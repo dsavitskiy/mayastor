@@ -8,9 +8,10 @@
 //!
 //! As connections come on, we randomly schedule them across cores by putting
 //! the qpair in a poll group that is allocated during reactor start.
-use std::cell::RefCell;
 
 use nix::errno::Errno;
+use once_cell::sync::OnceCell;
+use parking_lot::Mutex;
 use snafu::Snafu;
 
 pub use admin_cmd::{create_snapshot, set_snapshot_time, NvmeCpl, NvmfReq};
@@ -77,9 +78,7 @@ pub enum Error {
     Listener { nqn: String, trid: String },
 }
 
-thread_local! {
-    pub (crate) static NVMF_PGS: RefCell<Vec<PollGroup>> = RefCell::new(Vec::new());
-}
+pub(crate) static NVMF_PGS: OnceCell<Mutex<Vec<PollGroup>>> = OnceCell::new();
 
 impl Nvmf {
     /// initialize a new subsystem that handles NVMF (confusing names, cannot
@@ -92,23 +91,12 @@ impl Nvmf {
         // set up custom NVMe Admin command handler
         admin_cmd::setup_create_snapshot_hdlr();
 
-        if Config::get().nexus_opts.nvmf_enable {
-            NVMF_TGT.with(|tgt| tgt.borrow_mut().next_state());
-        } else {
-            debug!("nvmf target disabled");
-            unsafe { spdk_subsystem_init_next(0) }
-        }
+        unsafe { spdk_subsystem_init_next(0) }
     }
 
     extern "C" fn fini() {
         debug!("mayastor nvmf fini");
-        if Config::get().nexus_opts.nvmf_enable {
-            NVMF_TGT.with(|tgt| {
-                tgt.borrow_mut().start_shutdown();
-            });
-        } else {
-            unsafe { spdk_subsystem_fini_next() }
-        }
+        unsafe { spdk_subsystem_fini_next() }
     }
 
     pub fn new() -> Self {

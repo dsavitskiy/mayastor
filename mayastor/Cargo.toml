@@ -29,10 +29,6 @@ path = "src/bin/mayastor-client/main.rs"
 name = "jsonrpc"
 path = "src/bin/jsonrpc.rs"
 
-[[bin]]
-name = "casperf"
-path = "src/bin/casperf.rs"
-
 [dependencies]
 ansi_term = "0.12.1"
 async-task = "4.0.3"

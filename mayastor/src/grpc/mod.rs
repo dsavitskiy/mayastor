@@ -79,9 +79,16 @@ where
     F: Future<Output = Result<R, E>> + 'static,
     R: Send + Debug + 'static,
 {
-    Mthread::get_init()
-        .spawn_local(future)
-        .map_err(|_| Status::resource_exhausted("ENOMEM"))
+    let (tx, rx) = futures::channel::oneshot::channel();
+
+    crate::core::runtime::spawn_local(async move {
+        let result = future.await;
+
+        tx.send(result)
+            .expect("gRPC side dropped the future before it has completed");
+    });
+
+    Ok(rx)
 }
 
 macro_rules! default_ip {

@@ -114,7 +114,7 @@ pub struct Reactor {
 
 thread_local! {
     /// This queue holds any in coming futures from other cores
-    static QUEUE: (Sender<async_task::Runnable>, Receiver<async_task::Runnable>) = unbounded();
+    pub static QUEUE: (Sender<async_task::Runnable>, Receiver<async_task::Runnable>) = unbounded();
 }
 
 impl Reactors {
@@ -334,7 +334,7 @@ impl Reactor {
         // busy etc.
         let schedule = |t| QUEUE.with(|(s, _)| s.send(t).unwrap());
 
-        let (runnable, task) = async_task::spawn_local(future, schedule);
+        let (runnable, task) = unsafe { async_task::spawn_unchecked(Box::pin(future), schedule) };
         runnable.schedule();
         // the handler typically has no meaning to us unless we want to wait for
         // the spawned future to complete before we continue which is

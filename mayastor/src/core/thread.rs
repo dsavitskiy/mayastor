@@ -2,18 +2,10 @@ use std::ffi::{c_void, CString};
 
 use snafu::Snafu;
 use spdk_sys::{
-    spdk_get_thread,
-    spdk_set_thread,
-    spdk_thread,
-    spdk_thread_create,
-    spdk_thread_destroy,
-    spdk_thread_exit,
-    spdk_thread_get_by_id,
-    spdk_thread_get_id,
-    spdk_thread_get_name,
-    spdk_thread_is_exited,
-    spdk_thread_poll,
-    spdk_thread_send_msg,
+    spdk_get_thread, spdk_set_thread, spdk_thread, spdk_thread_create,
+    spdk_thread_destroy, spdk_thread_exit, spdk_thread_get_by_id,
+    spdk_thread_get_id, spdk_thread_get_name, spdk_thread_is_exited,
+    spdk_thread_poll, spdk_thread_send_msg,
 };
 
 use crate::core::{cpu_cores::CpuMask, CoreError, Cores, Reactors};
@@ -146,45 +138,41 @@ impl Mthread {
     }
 
     /// send the given thread 'msg' in xPDK speak.
-    pub fn msg<F, T>(&self, t: T, f: F)
+    pub fn msg<F>(&self, f: F)
     where
-        F: FnOnce(T),
-        T: std::fmt::Debug + 'static,
+        F: FnOnce(),
     {
         // context structure which is passed to the callback as argument
-        struct Ctx<F, T: std::fmt::Debug> {
+        struct Ctx<F> {
             closure: F,
-            args: T,
         }
 
         // helper routine to unpack the closure and its arguments
-        extern "C" fn trampoline<F, T>(arg: *mut c_void)
+        extern "C" fn trampoline<F>(arg: *mut c_void)
         where
-            F: FnOnce(T),
-            T: 'static + std::fmt::Debug,
+            F: FnOnce(),
         {
-            let ctx = unsafe { Box::from_raw(arg as *mut Ctx<F, T>) };
-            (ctx.closure)(ctx.args);
+            let ctx = unsafe { Box::from_raw(arg as *mut Ctx<F>) };
+            (ctx.closure)();
         }
 
-        let ctx = Box::new(Ctx {
-            closure: f,
-            args: t,
-        });
+        let ctx = Box::new(Ctx { closure: f });
 
         let rc = unsafe {
             spdk_thread_send_msg(
                 self.0.as_ptr(),
-                Some(trampoline::<F, T>),
+                Some(trampoline::<F>),
                 Box::into_raw(ctx).cast(),
             )
         };
         assert_eq!(rc, 0);
     }
 
-    /// spawn a future on a core the current thread is running on returning a
+    /// Spawn a future on a core the current thread is running on returning a
     /// channel which can be awaited. This decouples the SPDK runtime from the
-    /// future runtimes within rust.
+    /// future (tokio) runtimes within rust.
+    ///
+    /// Note that futures spawned locally from the mayastor runtime will panic.
     pub fn spawn_local<F>(&self, f: F) -> Result<Receiver<F::Output>, CoreError>
     where
         F: Future + 'static,
@@ -207,6 +195,7 @@ impl Mthread {
             F::Output: Send + Debug,
         {
             let mut ctx = unsafe { Box::from_raw(arg as *mut Ctx<F>) };
+            debug!(core =? Cores::current(), "running on");
             Reactors::current()
                 .spawn_local(async move {
                     let result = ctx.future.await;
@@ -230,6 +219,7 @@ impl Mthread {
         });
 
         let rc = unsafe {
+            debug!(core =? Cores::current(), "sending from");
             spdk_thread_send_msg(
                 self.0.as_ptr(),
                 Some(trampoline::<F>),

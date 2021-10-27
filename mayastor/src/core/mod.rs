@@ -49,7 +49,7 @@ pub use nvme::{
     NvmeStatus,
 };
 pub use reactor::{Reactor, ReactorState, Reactors, REACTOR_LIST};
-pub use runtime::spawn;
+pub use runtime::{spawn, spawn_local};
 pub use share::{Protocol, Share};
 pub use thread::Mthread;
 
@@ -65,7 +65,6 @@ mod dma;
 mod env;
 mod handle;
 mod io_device;
-pub mod io_driver;
 pub mod mempool;
 mod nvme;
 pub mod poller;

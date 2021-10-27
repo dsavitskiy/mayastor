@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate tracing;
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use futures::future::FutureExt;
 use structopt::StructOpt;
@@ -57,6 +57,12 @@ fn start_tokio_runtime(args: &MayastorCliArgs) {
                 grpc::MayastorGrpcServer::run(grpc_address, rpc_address)
                     .boxed(),
             );
+
+            let rx = Mthread::get_init().spawn_local(async move {
+               subsys::NvmfTarget::get().start().await
+            });
+
+            rx.unwrap().await.unwrap();
 
             futures::future::try_join_all(futures)
                 .await
@@ -136,8 +142,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("kernel nvme initiator multipath support: {}", nvme_mp);
 
     let ms = MayastorEnvironment::new(args.clone()).init();
-    start_tokio_runtime(&args);
 
+    start_tokio_runtime(&args);
     Reactors::current().running();
     Reactors::current().poll_reactor();
 

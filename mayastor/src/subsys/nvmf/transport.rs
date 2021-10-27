@@ -52,14 +52,14 @@ pub async fn add_tcp_transport() -> Result<(), Error> {
 
     let (s, r) = oneshot::channel::<ErrnoResult<()>>();
     unsafe {
-        NVMF_TGT.with(|t| {
+        NVMF_TGT.get().map(|t| {
             spdk_nvmf_tgt_add_transport(
-                t.borrow().tgt.as_ptr(),
+                t.as_ptr(),
                 transport,
                 Some(done_errno_cb),
                 cb_arg(s),
             );
-        })
+        }).unwrap();
     };
 
     let _result = r.await.unwrap();

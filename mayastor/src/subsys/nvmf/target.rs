@@ -1,25 +1,38 @@
 use std::{
     cell::RefCell,
     ffi::{c_void, CString},
+    pin::Pin,
     ptr::NonNull,
+    sync::atomic::{AtomicUsize, Ordering},
+    task::{Context, Poll},
 };
 
+use futures::{
+    channel::oneshot::{self, Receiver},
+    Future,
+};
+use lazy_static::__Deref;
 use nix::errno::Errno;
 
+use once_cell::sync::OnceCell;
+use parking_lot::Mutex;
 use spdk_sys::{
     nvmf_tgt_accept,
     spdk_env_get_core_count,
     spdk_nvmf_listen_opts,
     spdk_nvmf_listen_opts_init,
+    spdk_nvmf_poll_group,
     spdk_nvmf_poll_group_destroy,
     spdk_nvmf_subsystem_create,
     spdk_nvmf_subsystem_set_mn,
     spdk_nvmf_target_opts,
     spdk_nvmf_tgt,
+    spdk_nvmf_tgt_add_transport,
     spdk_nvmf_tgt_create,
     spdk_nvmf_tgt_destroy,
     spdk_nvmf_tgt_listen_ext,
     spdk_nvmf_tgt_stop_listen,
+    spdk_nvmf_transport_create,
     spdk_poller,
     spdk_poller_register_named,
     spdk_poller_unregister,
@@ -28,10 +41,18 @@ use spdk_sys::{
     SPDK_NVMF_DISCOVERY_NQN,
     SPDK_NVMF_SUBTYPE_DISCOVERY,
 };
+use tokio::runtime;
 
 use crate::{
     core::{Cores, Mthread, Reactor, Reactors},
-    ffihelper::{AsStr, FfiResult},
+    ffihelper::{
+        cb_arg,
+        done_errno_cb,
+        AsStr,
+        ErrnoResult,
+        FfiResult,
+        IntoCString,
+    },
     subsys::{
         nvmf::{
             poll_groups::PollGroup,
@@ -47,21 +68,37 @@ use crate::{
 
 type Result<T, E = Error> = std::result::Result<T, E>;
 
-thread_local! {
-pub (crate) static NVMF_TGT: RefCell<Target> = RefCell::new(Target::new());
+pub(crate) static NVMF_TGT: OnceCell<Target> = OnceCell::new();
+
+#[derive(Debug, Clone)]
+pub struct Target {
+    inner: Inner,
 }
 
-#[derive(Debug)]
-pub struct Target {
-    /// the raw pointer to  our target
-    pub(crate) tgt: NonNull<spdk_nvmf_tgt>,
-    /// poller used to accept new connections on
-    acceptor_poller: NonNull<spdk_poller>,
-    /// the number of poll groups created for this target
-    poll_group_count: u16,
-    /// The current state of the target
-    next_state: TargetState,
+///
+/// # Safety
+///
+/// The pointer is allocated by us and never freed during the lifetime of the
+/// binary. The target itself is protected internally by a mutex.
+#[derive(Debug, Clone)]
+struct Inner(NonNull<spdk_nvmf_tgt>);
+
+impl std::ops::Deref for Inner {
+    type Target = spdk_nvmf_tgt;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.0.as_ref() }
+    }
 }
+
+impl std::ops::DerefMut for Inner {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.0.as_mut() }
+    }
+}
+
+unsafe impl Send for Inner {}
+unsafe impl Sync for Inner {}
 
 impl Default for Target {
     fn default() -> Self {
@@ -69,229 +106,148 @@ impl Default for Target {
     }
 }
 
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TargetState {
-    /// the initial state of the target, allocate main data structures
-    Init,
-    /// initialize the poll groups
-    PollGroupInit,
-    /// initialize the acceptor
-    AcceptorInit,
-    /// add transport configurations
-    AddTransport,
-    /// add the listener for the target
-    AddListener,
-    /// the running state where we are ready to serve new subsystems
-    Running,
-    ShutdownSubsystems,
-    /// shutdown sequence has been started
-    DestroyPgs,
-    /// destroy portal groups
-    Shutdown,
-    /// shutdown has been completed
-    ShutdownCompleted,
-    /// an internal error has moved the target into the invalid state
-    Invalid,
+#[derive(Debug)]
+#[must_use = "futures do nothing unless you `.await` or poll them"]
+pub struct YieldNow(bool);
+
+impl Future for YieldNow {
+    type Output = ();
+
+    fn poll(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Self::Output> {
+        if !self.0 {
+            self.0 = true;
+            cx.waker().wake_by_ref();
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    }
 }
 
 impl Target {
-    /// we create a target by going through different stages. Its loosely
-    /// modeled as the native target so that we can "creep in" changes as
-    /// the API is not stable.
-    ///
-    /// Note a target cannot be constructed other than through the thread_local
-    /// which is only run on the master core
     fn new() -> Self {
-        assert_eq!(Cores::current(), Cores::first());
-        Self {
-            tgt: NonNull::dangling(),
-            acceptor_poller: NonNull::dangling(),
-            poll_group_count: 0,
-            next_state: TargetState::Init,
-        }
-    }
-
-    /// initialize the target and advance states
-    fn init(&mut self) -> Result<()> {
         let cfg = Config::get();
-        let tgt_ptr: Box<spdk_nvmf_target_opts> =
+        let opts: Box<spdk_nvmf_target_opts> =
             cfg.nvmf_tcp_tgt_conf.clone().into();
 
-        let tgt =
-            unsafe { spdk_nvmf_tgt_create(&*tgt_ptr as *const _ as *mut _) };
-        if tgt.is_null() {
-            return Err(Error::CreateTarget {
-                msg: "tgt pointer is None".to_string(),
-            });
+        NVMF_PGS.get_or_init(|| Mutex::new(Vec::new()));
+
+        dbg!(Mthread::get_init());
+        let tgt = unsafe { spdk_nvmf_tgt_create(&*opts as *const _ as *mut _) };
+        Self {
+            inner: Inner(NonNull::new(tgt).unwrap()),
         }
-        self.tgt = NonNull::new(tgt).unwrap();
-
-        self.next_state();
-        Ok(())
     }
 
-    /// internally drive the target towards the next state
-    pub(crate) fn next_state(&mut self) {
-        match self.next_state {
-            TargetState::Init => {
-                self.next_state = TargetState::PollGroupInit;
-                self.init().unwrap();
-            }
-            TargetState::PollGroupInit => {
-                self.next_state = TargetState::AcceptorInit;
-                self.init_poll_groups();
-            }
-            TargetState::AcceptorInit => {
-                self.next_state = TargetState::AddTransport;
-                self.init_acceptor();
-            }
-            TargetState::AddTransport => {
-                self.next_state = TargetState::AddListener;
-                self.add_transport();
-            }
-            TargetState::AddListener => {
-                self.next_state = TargetState::Running;
-                self.listen()
-                    .map_err(|e| {
-                        error!("failed to listen on address {}", e);
-                        self.next_state = TargetState::Invalid;
-                    })
-                    .unwrap();
-            }
-            TargetState::Running => {
-                self.running();
-            }
-            TargetState::ShutdownSubsystems => {
-                self.next_state = TargetState::DestroyPgs;
-                self.stop_subsystems();
-            }
-            TargetState::DestroyPgs => {
-                self.next_state = TargetState::Shutdown;
-                self.destroy_pgs();
-            }
-            TargetState::Shutdown => {
-                self.next_state = TargetState::ShutdownCompleted;
-                self.shutdown();
-            }
-            TargetState::Invalid => {
-                info!("Target configuration failed... doing nothing");
-                unsafe { spdk_subsystem_init_next(1) }
-            }
-
-            _ => panic!("Invalid target state"),
-        };
+    pub fn get() -> &'static Target {
+        NVMF_TGT.get_or_init(|| Self::default())
     }
 
-    /// add the transport to the target
-    fn add_transport(&self) {
-        Reactors::master().send_future(async {
-            let result = transport::add_tcp_transport().await;
-            NVMF_TGT.with(|t| {
-                if result.is_err() {
-                    t.borrow_mut().next_state = TargetState::Invalid;
-                }
-                t.borrow_mut().next_state();
+    pub async fn start(&self) {
+        self.create_poll_groups().await;
+        self.enable_tcp().await;
+        self.listen();
+
+        info!(ptr= ?self.as_ptr(), "target at address with {:?} PGs", NVMF_PGS.get().map(|p| p.lock().len()));
+    }
+
+    async fn create_poll_groups(&self) {
+        let groups = Cores::count().into_iter().map(|c| {
+                let (s,r) = oneshot::channel::<i32>();
+                Mthread::new(format!("mayastor_nvmf_tcp_pg_core_{}", c), c)
+                    .expect("failed to allocate thread")
+                    .msg(|| {
+                            let thread = Mthread::current().unwrap();
+                            let pg = PollGroup::new(thread);
+                            NVMF_PGS.get().map(|p| p.lock().push(pg));
+                            debug!(core = ?Cores::current(), thread = ?thread, "PG created");
+                            s.send(0).expect("failure during poll group creation");
             });
-        })
+                r
+        }).collect::<Vec<_>>();
+
+        futures::future::join_all(groups).await;
     }
 
-    /// initialize the acceptor so that we accept new incoming connections
-    fn init_acceptor(&mut self) {
-        self.acceptor_poller = NonNull::new(unsafe {
-            spdk_poller_register_named(
-                Some(Self::acceptor_poll),
-                self.tgt.as_ptr() as *mut _,
-                10000,
-                "mayastor_nvmf_tgt_poller\0" as *const _ as *mut _,
+    pub fn as_ptr(&self) -> *mut spdk_nvmf_tgt {
+        self.inner.0.as_ptr()
+    }
+
+    pub async fn destroy_async() {
+        let mut t = NVMF_PGS.get().unwrap().lock();
+        while let Some(pg) = t.pop() {
+            pg.destroy().await;
+        }
+
+        NVMF_TGT.get().map(|t| t.destroy());
+    }
+
+    async fn enable_tcp(&self) {
+        let cfg = Config::get();
+        let mut opts = cfg.nvmf_tcp_tgt_conf.opts.into();
+        let transport = unsafe {
+            spdk_nvmf_transport_create(
+                "TCP".to_string().into_cstring().into_raw(),
+                &mut opts,
             )
-        })
-        .unwrap();
+        };
 
-        self.next_state();
+        if transport.is_null() {
+            panic!()
+        }
+
+        let (s, r) = futures::channel::oneshot::channel::<ErrnoResult<()>>();
+        unsafe {
+            spdk_nvmf_tgt_add_transport(
+                self.as_ptr(),
+                transport,
+                Some(done_errno_cb),
+                cb_arg(s),
+            )
+        };
+
+        let _result = r.await.unwrap();
+        debug!("Added TCP nvmf transport");
     }
 
-    /// init the poll groups per core
-    fn init_poll_groups(&self) {
-        Reactors::iter().for_each(|r| {
-            if let Some(t) = Mthread::new(
-                format!("mayastor_nvmf_tcp_pg_core_{}", r.core()),
-                r.core(),
-            ) {
-                r.send_future(Self::create_poll_group(self.tgt.as_ptr(), t));
-            }
-        });
-    }
-
-    /// init the poll groups implementation
-    async fn create_poll_group(tgt: *mut spdk_nvmf_tgt, mt: Mthread) {
-        mt.with(|| {
-            let pg = PollGroup::new(tgt, mt);
-
-            Reactors::master().send_future(async move {
-                NVMF_TGT.with(|tgt| {
-                    let mut tgt = tgt.borrow_mut();
-                    NVMF_PGS.with(|p| p.borrow_mut().push(pg));
-                    tgt.poll_group_count += 1;
-                    if tgt.poll_group_count
-                        == unsafe { spdk_env_get_core_count() as u16 }
-                    {
-                        Reactors::master().send_future(async {
-                            NVMF_TGT.with(|tgt| {
-                                tgt.borrow_mut().next_state();
-                            })
-                        })
-                    }
-                });
-            });
-        });
-    }
-    /// poll function that the acceptor runs
-    extern "C" fn acceptor_poll(tgt: *mut c_void) -> i32 {
-        unsafe { nvmf_tgt_accept(tgt) };
-
-        0
-    }
-
-    /// Listen for incoming connections by default we only listen on the replica
-    /// port
-    fn listen(&mut self) -> Result<()> {
+    fn listen(&self) {
         let cfg = Config::get();
         let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
         let mut opts = spdk_nvmf_listen_opts::default();
+
         unsafe {
             spdk_nvmf_listen_opts_init(
                 &mut opts,
                 std::mem::size_of::<spdk_nvmf_listen_opts>() as u64,
             );
         }
+
         let rc = unsafe {
             spdk_nvmf_tgt_listen_ext(
-                self.tgt.as_ptr(),
+                self.as_ptr(),
                 trid_nexus.as_ptr(),
                 &mut opts,
             )
         };
 
         if rc != 0 {
-            return Err(Error::CreateTarget {
-                msg: "failed to back target".into(),
-            });
+            panic!("failed to create target");
         }
 
         let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
         let rc = unsafe {
             spdk_nvmf_tgt_listen_ext(
-                self.tgt.as_ptr(),
+                self.as_ptr(),
                 trid_replica.as_ptr(),
                 &mut opts,
             )
         };
 
         if rc != 0 {
-            return Err(Error::CreateTarget {
-                msg: "failed to front target".into(),
-            });
+            panic!("failed to create target");
         }
         info!(
             "nvmf target listening on {}:({},{})",
@@ -299,101 +255,30 @@ impl Target {
             trid_nexus.trsvcid.as_str(),
             trid_replica.trsvcid.as_str(),
         );
-        self.next_state();
-        Ok(())
     }
 
-    /// enable discovery for the target -- note that the discovery system is not
-    /// started
-    fn enable_discovery(&self) {
-        debug!("enabling discovery for target");
-        let discovery = unsafe {
-            NvmfSubsystem::from(spdk_nvmf_subsystem_create(
-                self.tgt.as_ptr(),
-                SPDK_NVMF_DISCOVERY_NQN.as_ptr() as *const std::os::raw::c_char,
-                SPDK_NVMF_SUBTYPE_DISCOVERY,
-                0,
-            ))
-        };
+    fn stop_listen() {
+        let tgt = NVMF_TGT.get().unwrap().as_ptr();
+        let cfg = Config::get();
+        let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
+        let rc = unsafe { spdk_nvmf_tgt_stop_listen(tgt, trid_nexus.as_ptr()) };
 
-        let mn = CString::new("Mayastor NVMe controller").unwrap();
-        unsafe {
-            spdk_nvmf_subsystem_set_mn(discovery.0.as_ptr(), mn.as_ptr())
-        }
-        .to_result(|e| Error::Subsystem {
-            source: Errno::from_i32(e),
-            nqn: "discovery".into(),
-            msg: "failed to set serial".into(),
-        })
-        .unwrap();
-
-        discovery.allow_any(true);
-
-        Reactor::block_on(async {
-            let _ = discovery.start().await.unwrap();
-        });
-    }
-
-    /// stop all subsystems on this target we are borrowed here
-    fn stop_subsystems(&self) {
-        let tgt = self.tgt.as_ptr();
-        Reactors::master().send_future(async move {
-            NvmfSubsystem::stop_all(tgt).await;
-            debug!("all subsystems stopped!");
-            NvmfSubsystem::destroy_all();
-        });
-    }
-
-    /// destroy all portal groups on this target
-    fn destroy_pgs(&mut self) {
-        extern "C" fn pg_destroy_done(_arg: *mut c_void, _arg1: i32) {
-            Reactors::master().send_future(async {
-                NVMF_TGT.with(|t| {
-                    let mut tgt = t.borrow_mut();
-                    tgt.poll_group_count -= 1;
-                    if tgt.poll_group_count == 0 {
-                        debug!("all pgs destroyed {:?}", tgt);
-                        tgt.next_state()
-                    }
-                })
-            })
+        if rc != 0 {
+            error!("failed to listen for target");
         }
 
-        extern "C" fn pg_destroy(arg: *mut c_void) {
-            unsafe {
-                let pg = Box::from_raw(arg as *mut PollGroup);
-                spdk_nvmf_poll_group_destroy(
-                    pg.group_ptr(),
-                    Some(pg_destroy_done),
-                    std::ptr::null_mut(),
-                )
-            }
+        let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
+        let rc =
+            unsafe { spdk_nvmf_tgt_stop_listen(tgt, trid_replica.as_ptr()) };
+
+        if rc != 0 {
+            panic!("failed to stop listen for target");
         }
 
-        NVMF_PGS.with(|t| {
-            t.borrow().iter().for_each(|pg| {
-                trace!("destroying pg: {:?}", pg);
-                pg.thread.send_msg(
-                    pg_destroy,
-                    Box::into_raw(Box::new(pg.clone())) as *mut _,
-                );
-            });
-        })
+        info!("NVMe-oF target stopped listening");
     }
 
-    /// final state for the target during init
-    pub fn running(&mut self) {
-        self.enable_discovery();
-        info!(
-            "nvmf target accepting new connections and is ready to roll..{}",
-            '\u{1F483}'
-        );
-
-        unsafe { spdk_subsystem_init_next(0) }
-    }
-
-    ///  shutdown procedure
-    fn shutdown(&mut self) {
+    fn destroy(&self) {
         extern "C" fn destroy_cb(_arg: *mut c_void, _status: i32) {
             info!("NVMe-oF target shutdown completed");
             unsafe {
@@ -401,36 +286,23 @@ impl Target {
             }
         }
 
-        unsafe { spdk_poller_unregister(&mut self.acceptor_poller.as_ptr()) };
-
-        let cfg = Config::get();
-        let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
-        let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
-
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_replica.as_ptr())
-        };
-
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_nexus.as_ptr())
-        };
-
         unsafe {
             spdk_nvmf_tgt_destroy(
-                self.tgt.as_ptr(),
+                NVMF_TGT.get().unwrap().as_ptr(),
                 Some(destroy_cb),
                 std::ptr::null_mut(),
             )
-        }
+        };
     }
 
-    /// start the shutdown of the target and subsystems
-    pub(crate) fn start_shutdown(&mut self) {
-        self.next_state = TargetState::ShutdownSubsystems;
-        Reactors::master().send_future(async {
-            NVMF_TGT.with(|tgt| {
-                tgt.borrow_mut().next_state();
-            });
+    /// stop all subsystems on this target we are borrowed here
+    pub fn stop_subsystems(&self, mut cb: impl FnMut() + 'static) {
+        crate::core::runtime::spawn_local(async move  {
+        dbg!(NvmfSubsystem::stop_all().await);
+        dbg!(Self::stop_listen());
+        dbg!(Self::destroy_async().await);
+        cb();
+        debug!("all subsystems stopped!");
         });
     }
 }

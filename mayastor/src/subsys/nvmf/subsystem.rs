@@ -86,11 +86,14 @@ impl IntoIterator for NvmfSubsystem {
     type IntoIter = NvmfSubsystemIterator;
 
     fn into_iter(self) -> Self::IntoIter {
-        NVMF_TGT.with(|t| {
-            NvmfSubsystemIterator(unsafe {
-                spdk_nvmf_subsystem_get_first(t.borrow().tgt.as_ptr())
+        NVMF_TGT
+            .get()
+            .map(|t| {
+                NvmfSubsystemIterator(unsafe {
+                    spdk_nvmf_subsystem_get_first(t.as_ptr())
+                })
             })
-        })
+            .expect("target is not intialized properly")
     }
 }
 
@@ -144,23 +147,19 @@ impl NvmfSubsystem {
     /// create a new subsystem where the NQN is based on the UUID
     pub fn new(uuid: &str) -> Result<Self, Error> {
         let nqn = gen_nqn(uuid).into_cstring();
-        let ss = NVMF_TGT
-            .with(|t| {
-                let tgt = t.borrow().tgt.as_ptr();
-                unsafe {
-                    spdk_nvmf_subsystem_create(
-                        tgt,
-                        nqn.as_ptr(),
-                        SPDK_NVMF_SUBTYPE_NVME,
-                        1,
-                    )
-                }
-            })
-            .to_result(|_| Error::Subsystem {
-                source: Errno::EEXIST,
-                nqn: uuid.into(),
-                msg: "ss ptr is null".into(),
-            })?;
+        let ss = unsafe {
+            spdk_nvmf_subsystem_create(
+                NVMF_TGT.get().unwrap().as_ptr(),
+                nqn.as_ptr(),
+                SPDK_NVMF_SUBTYPE_NVME,
+                1,
+            )
+        }
+        .to_result(|e| Error::Subsystem {
+            source: Errno::EEXIST,
+            nqn: uuid.into(),
+            msg: "failed to create ss".into(),
+        })?;
 
         // look closely, its a race car!
         let sn = CString::new("33' ~'~._`o##o>").unwrap();
@@ -560,38 +559,35 @@ impl NvmfSubsystem {
     pub fn destroy_all() {
         Reactors::master().send_future(async {
             // NvmfSubsystem::first().iter().for_each(|s| s.destroy());
-            NVMF_TGT.with(|t| {
-                let mut tgt = t.borrow_mut();
-                tgt.next_state()
-            })
+            NVMF_TGT.get().map(|t| {}).unwrap();
         });
     }
 
     /// stop all subsystems
-    pub async fn stop_all(tgt: *mut spdk_nvmf_tgt) {
-        let ss = unsafe {
-            NvmfSubsystem(
-                NonNull::new(spdk_nvmf_subsystem_get_first(tgt)).unwrap(),
-            )
-        };
-        for s in ss.into_iter() {
-            s.stop().await.unwrap();
+    pub async fn stop_all() {
+        let tgt = NVMF_TGT.get().expect("NVMe-oF target already gone");
+        if let Some(ss) =
+            unsafe { NonNull::new(spdk_nvmf_subsystem_get_first(tgt.as_ptr())) }
+        {
+            for s in NvmfSubsystem(ss).into_iter() {
+                s.stop().await.unwrap();
+            }
         }
     }
 
     /// Get the first subsystem within the system
     pub fn first() -> Option<NvmfSubsystem> {
-        NVMF_TGT.with(|t| {
-            let ss = unsafe {
-                spdk_nvmf_subsystem_get_first(t.borrow().tgt.as_ptr())
-            };
-
-            if ss.is_null() {
-                None
-            } else {
-                Some(NvmfSubsystem(NonNull::new(ss).unwrap()))
-            }
-        })
+        NVMF_TGT
+            .get()
+            .map(|t| {
+                let ss = unsafe { spdk_nvmf_subsystem_get_first(t.as_ptr()) };
+                if ss.is_null() {
+                    None
+                } else {
+                    Some(NvmfSubsystem(NonNull::new(ss).unwrap()))
+                }
+            })
+            .unwrap()
     }
 
     /// lookup a subsystem by its UUID
