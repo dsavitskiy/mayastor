@@ -38,13 +38,14 @@ let
   drvAttrs = rec {
     version = "21.10-8709a5789";
 
-    src = fetchFromGitHub {
-      owner = "openebs";
-      repo = "spdk";
-      rev = "8709a578910d99359d011701a3a70337d727f790";
-      sha256 = "0wwggi2g015xq3lspz3r5cns1h1fb8r5gxg4y6r2nq0ds0gm21rb";
-      fetchSubmodules = true;
-    };
+#    src = fetchFromGitHub {
+#      owner = "openebs";
+#      repo = "spdk";
+#      rev = "8709a578910d99359d011701a3a70337d727f790";
+#      sha256 = "0wwggi2g015xq3lspz3r5cns1h1fb8r5gxg4y6r2nq0ds0gm21rb";
+#      fetchSubmodules = true;
+#    };
+    src = /home/kona/spdk;
 
     patches = [
       # intel-ipsec-mb enables CET if the compiler supports it

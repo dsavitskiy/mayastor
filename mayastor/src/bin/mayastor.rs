@@ -128,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-    info!("Starting Mayastor version: {}", GIT_VERSION);
+    info!("Starting Mayastor version [macdev-3]: {}", GIT_VERSION);
     info!(
         "kernel io_uring support: {}",
         if uring::kernel_support() { "yes" } else { "no" }

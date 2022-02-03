@@ -30,3 +30,4 @@ test/python/common_pb2_grpc.py
 /test/python/replica_pb2_grpc.py
 /test/python/venv/*
 /package.json
+.DS_Store

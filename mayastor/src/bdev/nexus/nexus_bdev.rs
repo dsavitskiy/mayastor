@@ -515,7 +515,7 @@ fn update_failfast_cb(
 ) -> ChannelTraverseStatus {
     let channel = channel.inner_mut();
     ctx.child.as_ref().map(|child| channel.remove_child(child));
-    debug!(?ctx.nexus, ?ctx.child, "removed from channel");
+    // debug!(?ctx.nexus, ?ctx.child, "removed from channel");
     ChannelTraverseStatus::Ok
 }
 
@@ -800,11 +800,13 @@ impl<'n> Nexus<'n> {
             return Ok(());
         }
 
-        info!(
-            "{} resuming nexus, waiters: {}",
-            self.name,
-            self.pause_waiters.len(),
-        );
+        // info!(
+        //     "{} resuming nexus, waiters: {}",
+        //     self.name,
+        //     self.pause_waiters.len(),
+        // );
+
+        info!("---- do resuming Nexus {}", self.name);
 
         if let Some(Protocol::Nvmf) = self.shared() {
             if self.pause_waiters.is_empty() {
@@ -956,7 +958,7 @@ impl<'n> Nexus<'n> {
                 ctx,
             );
 
-            debug!(?self, "all channels retired");
+            // debug!(?self, "all channels retired");
             r.await.expect("update failfast sender already dropped");
         }
 
@@ -967,21 +969,48 @@ impl<'n> Nexus<'n> {
         self: Pin<&mut Self>,
         name: String,
     ) -> Result<(), Error> {
+        let xxchild_name = name.clone();
+        let xxme_name = self.name.clone();
+
+        debug!("---- DO CHILD RETIRE MODE v6 !!!!: {} :: {} ...", xxme_name, xxchild_name);
+
         self.child_retire_for_each_channel(Some(name.clone()))
             .await?;
-        debug!(?self, "PAUSE");
+
+        // debug!("---- SLEEPY Nexus: {} ...", xxme_name);
+        // use std::{thread, time};
+        // thread::sleep(time::Duration::from_millis(500));
+        // debug!("---- SLEEPY Nexus: {} DONE", xxme_name);
+
+        debug!("---- PAUSE Nexus: {} ...", xxme_name);
         self.pause().await?;
-        debug!(?self, "UNPAUSE");
+        debug!("---- PAUSE Nexus: {} DONE", xxme_name);
+
         if let Some(child) = self.lookup_child(&name) {
             let uri = child.name.clone();
             // schedule the deletion of the child eventhough etcd has not been
             // updated yet we do not need to wait for that to
             // complete anyway.
+
+            debug!("---- REMOVE CHILD Nexus: {} :: {} ... ", xxme_name, xxchild_name);
+
             MWQ.enqueue(Command::RemoveDevice(self.name.clone(), name));
+
+            debug!("---- REMOVE CHILD Nexus: {} :: {} persist ... ", xxme_name, xxchild_name);
+
             self.persist(PersistOp::Update((uri.clone(), child.state())))
                 .await;
+
+            debug!("---- REMOVE CHILD Nexus: {} :: {} DONE", xxme_name, xxchild_name);
         }
-        self.resume().await
+
+        debug!("---- RESUME Nexus: {} ...", xxme_name);
+
+        let rr = self.resume().await;
+
+        debug!("---- RESUME Nexus: {} DONE", xxme_name);
+
+        rr
     }
 
     #[allow(dead_code)]

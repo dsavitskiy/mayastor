@@ -216,7 +216,7 @@ impl<'a> NvmeController<'a> {
     pub fn ctrlr_as_ptr(&self) -> *mut spdk_nvme_ctrlr {
         self.inner.as_ref().map_or(std::ptr::null_mut(), |c| {
             let ptr = c.ctrlr.as_ptr();
-            debug!("SPDK handle {:p}", ptr);
+            // debug!("SPDK handle {:p}", ptr);
             ptr
         })
     }
@@ -419,7 +419,7 @@ impl<'a> NvmeController<'a> {
             .as_mut()
             .expect("(BUG) no inner NVMe controller defined yet");
         inner.namespaces.clear();
-        debug!("{} all namespaces removed", self.name);
+        // debug!("{} all namespaces removed", self.name);
     }
 
     /// Get I/O statistics for all I/O channels of the controller.
@@ -511,7 +511,7 @@ impl<'a> NvmeController<'a> {
             self.timeout_config.as_mut().start_device_destroy();
         }
 
-        debug!("{} shutting down the controller", self.name);
+        // debug!("{} shutting down the controller", self.name);
 
         let ctx = ShutdownCtx {
             name: self.get_name(),
@@ -927,16 +927,16 @@ pub(crate) async fn destroy_device(name: String) -> Result<(), NexusBdevError> {
     }
 
     // Notify the listeners.
-    debug!(?name, "notifying listeners about device removal");
+    // debug!(?name, "notifying listeners about device removal");
     {
         let controller = carc.lock();
         let num_listeners =
             controller.notify_listeners(DeviceEventType::DeviceRemoved);
-        debug!(
-            ?name,
-            ?num_listeners,
-            "listeners notified about device removal"
-        );
+        // debug!(
+        //     ?name,
+        //     ?num_listeners,
+        //     "listeners notified about device removal"
+        // );
     }
 
     let mut carc = carc;

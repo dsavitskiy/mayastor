@@ -173,12 +173,13 @@ impl<'n> NexusBio<'n> {
             self.ok_checked();
         } else {
             // IO failure, mark the IO failed and take the child out
-            error!(
-                ?self,
-                "{} IO completion failed: {:?}",
-                child.device_name(),
-                self.ctx()
-            );
+            // error!(
+            //     ?self,
+            //     "{} IO completion failed: {:?}",
+            //     child.device_name(),
+            //     self.ctx()
+            // );
+            // error!("---- !!!! I/O COMP ERR of {} :: {:?} + {}", child.device_name(), self.ctx().status, self.ctx().must_fail);
             self.ctx_mut().status = IoStatus::Failed;
             self.ctx_mut().must_fail = true;
             self.handle_failure(child, status);
@@ -213,7 +214,8 @@ impl<'n> NexusBio<'n> {
     #[inline]
     fn retry_checked(&mut self) {
         if self.ctx().in_flight == 0 {
-            debug!(?self, "resubmitting IO");
+            // debug!(?self, "resubmitting IO");
+            // error!("---- !!!! RETRY CHECKED :: {:?} + {}", self.ctx().status, self.ctx().must_fail);
             self.clone().submit_request();
         }
     }
@@ -501,14 +503,19 @@ impl<'n> NexusBio<'n> {
         // The child state was not faulted yet, so this is the first IO
         // to this child for which we encountered an error.
         if needs_retire {
-            self.do_retire(child);
+            // warn!("---- SCHED RETIRE -- {}", child);
+            self.do_retire(child.clone());
+        } else {
+            // warn!("---- !!!! NO !!!! SCHED RETIRE -- {}", child);
         }
 
         // if the IO was failed because of retire, resubmit the IO
         if retry {
+            // warn!("---- AFTER SCHED RETIRE RETRY -- {}", child);
             return self.ok_checked();
         }
 
+        // warn!("---- AFTER SCHED RETIRE FAIL CHECKED -- {}", child);
         self.fail_checked();
     }
 }
@@ -525,7 +532,8 @@ pub(crate) fn nexus_submit_request(
 /// Retire a child for this nexus.
 async fn nexus_child_retire(nexus_name: String, device: String) {
     if let Some(mut nexus) = nexus_lookup_mut(&nexus_name) {
-        warn!(?nexus, ?device, "retiring child");
+        // warn!(?nexus, ?device, "retiring child");
+        warn!("---- RETIRE CHILD : {} :: {}", nexus_name, device);
 
         if let Err(e) = nexus.as_mut().child_retire(device.clone()).await {
             error!(?e, "double pause which we cant sneak in...");

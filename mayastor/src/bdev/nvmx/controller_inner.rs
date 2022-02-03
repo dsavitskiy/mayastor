@@ -79,7 +79,7 @@ pub(crate) struct TimeoutConfig {
 
 impl Drop for TimeoutConfig {
     fn drop(&mut self) {
-        debug!("{} dropping TimeoutConfig", self.name);
+        // debug!("{} dropping TimeoutConfig", self.name);
     }
 }
 

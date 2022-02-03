@@ -111,31 +111,33 @@ impl NexusChannelInner {
     /// Remove a child from the readers and/or writers
     pub fn remove_child(&mut self, name: &str) -> bool {
         self.previous = 0;
-        trace!(
-            ?name,
-            "core: {} thread: {} removing from during submission channels",
-            Cores::current(),
-            Mthread::current().unwrap().name()
-        );
-        trace!(
-            "{}: Current number of IO channels write: {} read: {}",
-            self.get_nexus().name,
-            self.writers.len(),
-            self.readers.len(),
-        );
+        // trace!(
+        //     ?name,
+        //     "core: {} thread: {} removing from during submission channels",
+        //     Cores::current(),
+        //     Mthread::current().unwrap().name()
+        // );
+        // trace!(
+        //     "{}: Current number of IO channels write: {} read: {}",
+        //     self.get_nexus().name,
+        //     self.writers.len(),
+        //     self.readers.len(),
+        // );
+
         self.readers
             .retain(|c| c.get_device().device_name() != name);
         self.writers
             .retain(|c| c.get_device().device_name() != name);
 
-        trace!(?name,
-            "core: {} thread: {}: New number of IO channels write:{} read:{} out of {} children",
-            Cores::current(),
-            Mthread::current().unwrap().name(),
-            self.writers.len(),
-            self.readers.len(),
-            self.get_nexus().children.len()
-        );
+        // trace!(?name,
+        //     "core: {} thread: {}: New number of IO channels write:{} read:{} out of {} children",
+        //     Cores::current(),
+        //     Mthread::current().unwrap().name(),
+        //     self.writers.len(),
+        //     self.readers.len(),
+        //     self.get_nexus().children.len()
+        // );
+
         self.fault_child(name)
     }
 
@@ -149,18 +151,18 @@ impl NexusChannelInner {
     /// we simply put back all the channels, and reopen the bdevs that are in
     /// the online state.
     pub(crate) fn refresh(&mut self) {
-        info!(
-            "{}(thread:{:?}), refreshing IO channels",
-            self.get_nexus().name,
-            Mthread::current().unwrap().name(),
-        );
-
-        trace!(
-            "{}: Current number of IO channels write: {} read: {}",
-            self.get_nexus().name,
-            self.writers.len(),
-            self.readers.len(),
-        );
+        // info!(
+        //     "{}(thread:{:?}), refreshing IO channels",
+        //     self.get_nexus().name,
+        //     Mthread::current().unwrap().name(),
+        // );
+        //
+        // trace!(
+        //     "{}: Current number of IO channels write: {} read: {}",
+        //     self.get_nexus().name,
+        //     self.writers.len(),
+        //     self.readers.len(),
+        // );
 
         // clear the vector of channels and reset other internal values,
         // clearing the values will drop any existing handles in the
@@ -222,13 +224,13 @@ impl NexusChannelInner {
         self.writers = writers;
         self.readers = readers;
 
-        trace!(
-            "{}: New number of IO channels write:{} read:{} out of {} children",
-            self.get_nexus().name,
-            self.writers.len(),
-            self.readers.len(),
-            self.get_nexus().children.len()
-        );
+        // trace!(
+        //     "{}: New number of IO channels write:{} read:{} out of {} children",
+        //     self.get_nexus().name,
+        //     self.writers.len(),
+        //     self.readers.len(),
+        //     self.get_nexus().children.len()
+        // );
 
         //trace!("{:?}", nexus.children);
     }

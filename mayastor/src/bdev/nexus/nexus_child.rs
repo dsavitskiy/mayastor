@@ -202,13 +202,13 @@ impl<'c> NexusChild<'c> {
     pub(crate) fn set_state(&self, state: ChildState) {
         let prev_state = self.state.swap(state);
         self.prev_state.store(prev_state);
-        trace!(
-            "{}: child {}: state change from {} to {}",
-            self.parent,
-            self.name,
-            prev_state.to_string(),
-            state.to_string(),
-        );
+        // trace!(
+        //     "{}: child {}: state change from {} to {}",
+        //     self.parent,
+        //     self.name,
+        //     prev_state.to_string(),
+        //     state.to_string(),
+        // );
     }
 
     /// Open the child in RW mode and claim the device to be ours. If the child
