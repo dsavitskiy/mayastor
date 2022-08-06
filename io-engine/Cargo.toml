@@ -39,6 +39,10 @@ path = "src/bin/jsonrpc.rs"
 name = "casperf"
 path = "src/bin/casperf.rs"
 
+[[bin]]
+name = "spdkbench"
+path = "src/bin/spdkbench/main.rs"
+
 [dependencies]
 ansi_term = "0.12.1"
 async-task = "4.0.3"
