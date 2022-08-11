@@ -22,7 +22,6 @@ use io_engine::{
 pub mod bdev_io;
 pub mod compose;
 pub mod error_bdev;
-pub mod rpc;
 
 pub use compose::MayastorTest;
 
