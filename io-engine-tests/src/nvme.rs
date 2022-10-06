@@ -5,7 +5,7 @@ use std::{
     collections::BTreeMap,
     net::SocketAddr,
     path::PathBuf,
-    process::{Command, ExitStatus},
+    process::Command,
 };
 
 /// Connects an NVMe device upon creation and disconnects when dropped.
@@ -14,16 +14,23 @@ pub struct NmveConnectGuard {
 }
 
 impl NmveConnectGuard {
-    pub fn connect(target_addr: &str, nqn: &str) -> Self {
-        nvme_connect(target_addr, nqn, true);
-
-        Self {
-            nqn: nqn.to_string(),
+    pub async fn connect(
+        target_addr: &str,
+        nqn: &str,
+    ) -> std::io::Result<Self> {
+        match nvme_connect(target_addr, nqn).await {
+            Ok(_) => Ok(Self {
+                nqn: nqn.to_string(),
+            }),
+            Err(e) => Err(e),
         }
     }
 
-    pub fn connect_addr(addr: &SocketAddr, nqn: &str) -> Self {
-        Self::connect(&addr.ip().to_string(), nqn)
+    pub async fn connect_addr(
+        addr: &SocketAddr,
+        nqn: &str,
+    ) -> std::io::Result<Self> {
+        Self::connect(&addr.ip().to_string(), nqn).await
     }
 }
 
@@ -82,11 +89,7 @@ pub fn nvme_discover(target_addr: &str) -> Vec<BTreeMap<String, String>> {
     }
 }
 
-pub fn nvme_connect(
-    target_addr: &str,
-    nqn: &str,
-    must_succeed: bool,
-) -> ExitStatus {
+pub async fn nvme_connect(target_addr: &str, nqn: &str) -> std::io::Result<()> {
     let status = Command::new("nvme")
         .args(&["connect"])
         .args(&["-t", "tcp"])
@@ -98,19 +101,15 @@ pub fn nvme_connect(
 
     if !status.success() {
         let msg = format!(
-            "failed to connect to {}, nqn '{}': {}",
+            "Failed to connect to {}, nqn '{}': {}",
             target_addr, nqn, status,
         );
-        if must_succeed {
-            panic!("{}", msg);
-        } else {
-            eprintln!("{}", msg);
-        }
-    } else {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, msg));
     }
 
-    status
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    Ok(())
 }
 
 pub fn nvme_disconnect_nqn(nqn: &str) {

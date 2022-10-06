@@ -16,7 +16,7 @@ pub async fn test_write_to_nvmf(
     count: usize,
     buf_size_mb: usize,
 ) -> std::io::Result<()> {
-    let _cg = NmveConnectGuard::connect_addr(&nvmf.addr, &nvmf.nqn);
+    let _cg = NmveConnectGuard::connect_addr(&nvmf.addr, &nvmf.nqn).await?;
     let path = find_mayastor_nvme_device_path(&nvmf.serial)?;
     test_write_to_file(path, count, buf_size_mb).await
 }
@@ -30,7 +30,7 @@ pub async fn test_devices_identical(
     let mut first: Option<String> = None;
 
     for d in devices {
-        let _cg = NmveConnectGuard::connect_addr(&d.addr, &d.nqn);
+        let _cg = NmveConnectGuard::connect_addr(&d.addr, &d.nqn).await?;
         let path = find_mayastor_nvme_device_path(&d.serial)?;
         let ch = compute_file_checksum(&path).await?;
         if let Some(f) = &first {

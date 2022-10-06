@@ -245,7 +245,8 @@ pub enum LogStyle {
 pub struct LogFormat {
     ansi: bool,
     style: LogStyle,
-    no_date: bool,
+    show_date: bool,
+    show_host: bool,
 }
 
 impl Default for LogFormat {
@@ -253,7 +254,8 @@ impl Default for LogFormat {
         Self {
             ansi: atty::is(atty::Stream::Stdout),
             style: LogStyle::Default,
-            no_date: false,
+            show_date: true,
+            show_host: false,
         }
     }
 }
@@ -270,7 +272,10 @@ impl FromStr for LogFormat {
                 "compact" => r.style = LogStyle::Compact,
                 "color" => r.ansi = true,
                 "nocolor" => r.ansi = false,
-                "nodate" => r.no_date = true,
+                "date" => r.show_date = true,
+                "nodate" => r.show_date = false,
+                "host" => r.show_host = true,
+                "nohost" => r.show_host = false,
                 _ => return Err(format!("Bad log format option: {}", p)),
             }
         }
@@ -320,15 +325,16 @@ impl LogFormat {
     {
         let normalized = event.normalized_metadata();
         let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
-        let chrono_fmt = if self.no_date {
-            "%T%.6f"
-        } else {
+        let chrono_fmt = if self.show_date {
             "%FT%T%.9f%Z"
+        } else {
+            "%T%.6f"
         };
 
         write!(
             writer,
-            "[{} {} {}{}:{}] ",
+            "[{}{} {} {}{}:{}] ",
+            self.hostname(),
             chrono::Local::now().format(chrono_fmt),
             FormatLevel::new(meta.level(), self.ansi),
             meta.target(),
@@ -362,8 +368,13 @@ impl LogFormat {
 
         write!(
             buf,
-            "{} | {:<18} [{}] ",
-            now.format(if self.no_date { "%T%.6f" } else { "%x %T%.6f" }),
+            "{}{} | {:<18} [{}] ",
+            self.hostname(),
+            now.format(if self.show_date {
+                "%x %T%.6f"
+            } else {
+                "%T%.6f"
+            }),
             loc,
             fmt.short(),
         )?;
@@ -379,6 +390,21 @@ impl LogFormat {
         fmt.fmt_line(writer, &buf)?;
 
         writeln!(writer)
+    }
+
+    fn hostname(&self) -> String {
+        if self.show_host {
+            let mut buf = [0u8; 64];
+            let s = match nix::unistd::gethostname(&mut buf) {
+                Ok(name) => name.to_str().unwrap_or("").to_string(),
+                Err(_) => {
+                    std::env::var("HOSTNAME").unwrap_or_else(|_| String::new())
+                }
+            };
+            format!("{} :: ", s)
+        } else {
+            String::new()
+        }
     }
 }
 

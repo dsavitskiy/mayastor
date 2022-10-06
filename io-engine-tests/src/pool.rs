@@ -1,7 +1,7 @@
 pub use super::compose::rpc::v1::pool::Pool;
 use super::{
     compose::rpc::v1::{
-        pool::{CreatePoolRequest, ListPoolOptions},
+        pool::{CreatePoolRequest, DestroyPoolRequest, ListPoolOptions},
         SharedRpcHandle,
         Status,
     },
@@ -51,6 +51,11 @@ impl PoolBuilder {
         self.with_bdev(&bdev)
     }
 
+    pub fn with_device(self, dev_name: &str) -> Self {
+        let bdev = format!("aio://{}", dev_name);
+        self.with_bdev(&bdev)
+    }
+
     pub fn rpc(&self) -> SharedRpcHandle {
         self.rpc.clone()
     }
@@ -69,13 +74,27 @@ impl PoolBuilder {
 
     pub async fn create(&mut self) -> Result<Pool, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .pool
             .create_pool(CreatePoolRequest {
                 name: self.name(),
                 uuid: Some(self.uuid()),
                 pooltype: 0,
                 disks: vec![self.bdev.as_ref().unwrap().clone()],
+            })
+            .await
+            .map(|r| r.into_inner())
+    }
+
+    pub async fn destroy(&mut self) -> Result<(), Status> {
+        self.rpc()
+            .lock()
+            .await
+            .pool
+            .destroy_pool(DestroyPoolRequest {
+                name: self.name(),
+                uuid: Some(self.uuid()),
             })
             .await
             .map(|r| r.into_inner())
@@ -97,7 +116,8 @@ impl PoolBuilder {
 }
 
 pub async fn list_pools(rpc: SharedRpcHandle) -> Result<Vec<Pool>, Status> {
-    rpc.borrow_mut()
+    rpc.lock()
+        .await
         .pool
         .list_pools(ListPoolOptions {
             name: None,

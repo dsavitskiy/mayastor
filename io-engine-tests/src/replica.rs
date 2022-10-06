@@ -6,6 +6,7 @@ use super::{
             DestroyReplicaRequest,
             ListReplicaOptions,
             ShareReplicaRequest,
+            UnshareReplicaRequest,
         },
         SharedRpcHandle,
         Status,
@@ -63,6 +64,11 @@ impl ReplicaBuilder {
         self.with_uuid(&generate_uuid())
     }
 
+    pub fn with_pool_uuid(mut self, pool_uuid: &str) -> Self {
+        self.pool_uuid = Some(pool_uuid.to_string());
+        self
+    }
+
     pub fn with_pool(mut self, p: &PoolBuilder) -> Self {
         self.pool_uuid = Some(p.uuid());
         self
@@ -117,7 +123,7 @@ impl ReplicaBuilder {
 
     pub fn nvmf_location(&self) -> NvmfLocation {
         NvmfLocation {
-            addr: self.rpc().borrow().endpoint,
+            addr: self.rpc().endpoint,
             nqn: self.nqn(),
             serial: self.serial(),
         }
@@ -125,7 +131,8 @@ impl ReplicaBuilder {
 
     pub async fn create(&mut self) -> Result<Replica, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .replica
             .create_replica(CreateReplicaRequest {
                 name: self.name(),
@@ -141,7 +148,8 @@ impl ReplicaBuilder {
 
     pub async fn destroy(&mut self) -> Result<(), Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .replica
             .destroy_replica(DestroyReplicaRequest {
                 uuid: self.uuid(),
@@ -153,7 +161,8 @@ impl ReplicaBuilder {
     pub async fn share(&mut self) -> Result<Replica, Status> {
         let r = self
             .rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .replica
             .share_replica(ShareReplicaRequest {
                 uuid: self.uuid(),
@@ -162,6 +171,21 @@ impl ReplicaBuilder {
             .await
             .map(|r| r.into_inner())?;
         self.shared_uri = Some(r.uri.clone());
+        Ok(r)
+    }
+
+    pub async fn unshare(&mut self) -> Result<Replica, Status> {
+        let r = self
+            .rpc()
+            .lock()
+            .await
+            .replica
+            .unshare_replica(UnshareReplicaRequest {
+                uuid: self.uuid(),
+            })
+            .await
+            .map(|r| r.into_inner())?;
+        self.shared_uri = None;
         Ok(r)
     }
 
@@ -183,7 +207,8 @@ impl ReplicaBuilder {
 pub async fn list_replicas(
     rpc: SharedRpcHandle,
 ) -> Result<Vec<Replica>, Status> {
-    rpc.borrow_mut()
+    rpc.lock()
+        .await
         .replica
         .list_replicas(ListReplicaOptions {
             name: None,

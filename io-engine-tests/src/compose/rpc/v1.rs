@@ -1,8 +1,8 @@
 use composer::ComposeTest;
 
 use std::{
-    cell::RefCell,
     net::{SocketAddr, TcpStream},
+    ops::Deref,
     sync::Arc,
     thread,
     time::Duration,
@@ -12,6 +12,41 @@ use tonic::transport::Channel;
 pub use tonic::Status;
 
 pub use mayastor_api::v1::*;
+
+/// TODO
+#[derive(Clone)]
+pub struct SharedRpcHandle {
+    pub name: String,
+    pub endpoint: SocketAddr,
+    rpc: Arc<tokio::sync::Mutex<RpcHandle>>,
+}
+
+unsafe impl Send for SharedRpcHandle {}
+unsafe impl Sync for SharedRpcHandle {}
+
+impl Deref for SharedRpcHandle {
+    type Target = Arc<tokio::sync::Mutex<RpcHandle>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rpc
+    }
+}
+
+impl From<RpcHandle> for SharedRpcHandle {
+    fn from(rpc: RpcHandle) -> Self {
+        SharedRpcHandle {
+            name: rpc.name.clone(),
+            endpoint: rpc.endpoint.clone(),
+            rpc: Arc::new(tokio::sync::Mutex::new(rpc)),
+        }
+    }
+}
+
+impl PartialEq for SharedRpcHandle {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.endpoint == other.endpoint
+    }
+}
 
 #[derive(Clone)]
 pub struct RpcHandle {
@@ -24,14 +59,6 @@ pub struct RpcHandle {
     pub host: host::HostRpcClient<Channel>,
     pub nexus: nexus::NexusRpcClient<Channel>,
 }
-
-impl PartialEq for RpcHandle {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.endpoint == other.endpoint
-    }
-}
-
-pub type SharedRpcHandle = Arc<RefCell<RpcHandle>>;
 
 impl RpcHandle {
     /// connect to the containers and construct a handle
@@ -144,8 +171,6 @@ impl<'a> GrpcConnect<'a> {
         &self,
         name: &str,
     ) -> Result<SharedRpcHandle, String> {
-        self.grpc_handle(name)
-            .await
-            .map(|rpc| Arc::new(RefCell::new(rpc)))
+        self.grpc_handle(name).await.map(SharedRpcHandle::from)
     }
 }

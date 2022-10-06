@@ -8,6 +8,7 @@ default-run = "io-engine-client"
 build = "build.rs"
 
 [features]
+default = ["diagnostics"]
 # Enables fault injection code.
 fault_injection = []
 # Enables diagnostics operations.

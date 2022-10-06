@@ -7,6 +7,7 @@ use super::{
             ChildState,
             CreateNexusRequest,
             ListNexusOptions,
+            DestroyNexusRequest,
             Nexus,
             PublishNexusRequest,
         },
@@ -127,7 +128,7 @@ impl NexusBuilder {
 
     pub fn nvmf_location(&self) -> NvmfLocation {
         NvmfLocation {
-            addr: self.rpc().borrow().endpoint,
+            addr: self.rpc().endpoint,
             nqn: self.nqn(),
             serial: self.serial(),
         }
@@ -135,7 +136,8 @@ impl NexusBuilder {
 
     pub async fn create(&mut self) -> Result<Nexus, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .nexus
             .create_nexus(CreateNexusRequest {
                 name: self.name(),
@@ -154,9 +156,22 @@ impl NexusBuilder {
             .map(|r| r.into_inner().nexus.unwrap())
     }
 
+    pub async fn destroy(&mut self) -> Result<(), Status> {
+        self.rpc()
+            .lock()
+            .await
+            .nexus
+            .destroy_nexus(DestroyNexusRequest {
+                uuid: self.uuid(),
+            })
+            .await
+            .map(|r| r.into_inner())
+    }
+
     pub async fn publish(&self) -> Result<Nexus, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .nexus
             .publish_nexus(PublishNexusRequest {
                 uuid: self.uuid(),
@@ -173,7 +188,8 @@ impl NexusBuilder {
         norebuild: bool,
     ) -> Result<Nexus, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .nexus
             .add_child_nexus(AddChildNexusRequest {
                 uuid: self.uuid(),
@@ -194,7 +210,8 @@ impl NexusBuilder {
 
     pub async fn online_child_bdev(&self, bdev: &str) -> Result<Nexus, Status> {
         self.rpc()
-            .borrow_mut()
+            .lock()
+            .await
             .nexus
             .child_operation(ChildOperationRequest {
                 nexus_uuid: self.uuid(),
@@ -240,7 +257,8 @@ impl NexusBuilder {
 }
 
 pub async fn list_nexuses(rpc: SharedRpcHandle) -> Result<Vec<Nexus>, Status> {
-    rpc.borrow_mut()
+    rpc.lock()
+        .await
         .nexus
         .list_nexus(ListNexusOptions {
             name: None,

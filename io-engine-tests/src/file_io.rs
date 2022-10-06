@@ -1,34 +1,16 @@
-use once_cell::sync::OnceCell;
-use rand::{distributions::Uniform, Rng, SeedableRng};
-use rand_chacha::ChaCha8Rng;
+use super::rand::create_random_test_buf;
 use std::{io::SeekFrom, path::Path};
 use tokio::{
     fs::OpenOptions,
     io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
 };
 
-static RNG_SEED: OnceCell<ChaCha8Rng> = OnceCell::new();
-
-pub fn set_test_buf_rng_seed(seed: u64) {
-    RNG_SEED.set(ChaCha8Rng::seed_from_u64(seed)).unwrap();
-}
-
-fn create_test_buf(size_mb: usize) -> Vec<u8> {
-    let rng = RNG_SEED.get_or_init(ChaCha8Rng::from_entropy).clone();
-
-    let range = Uniform::new_inclusive(0, u8::MAX);
-
-    rng.sample_iter(&range)
-        .take(size_mb * 1024 * 1024)
-        .collect()
-}
-
 pub async fn test_write_to_file(
     path: impl AsRef<Path>,
     count: usize,
     buf_size_mb: usize,
 ) -> std::io::Result<()> {
-    let src_buf = create_test_buf(buf_size_mb);
+    let src_buf = create_random_test_buf(buf_size_mb).await;
 
     let mut dst_buf: Vec<u8> = vec![];
     dst_buf.resize(src_buf.len(), 0);
@@ -92,4 +74,20 @@ pub async fn compute_file_checksum(
     }
 
     Ok(hex::encode(hasher.compute().0))
+}
+
+pub async fn wipe_device(device_path: &str) -> std::io::Result<()> {
+    println!("@@@@ wipe {}", device_path);
+    let mut f = OpenOptions::new()
+        .write(true)
+        .read(true)
+        .create(false)
+        .truncate(false)
+        .open(&device_path)
+        .await?;
+
+    let mut buf: Vec<u8> = vec![];
+    buf.resize(1024 * 1024, 0);
+
+    f.write_all(&buf).await
 }

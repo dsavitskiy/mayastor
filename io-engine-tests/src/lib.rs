@@ -29,6 +29,7 @@ pub mod nexus;
 pub mod nvme;
 pub mod nvmf;
 pub mod pool;
+pub mod rand;
 pub mod replica;
 
 pub use compose::MayastorTest;

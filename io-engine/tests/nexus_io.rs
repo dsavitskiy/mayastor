@@ -171,19 +171,19 @@ async fn nexus_io_multipath() {
         .unwrap();
 
     let nqn = format!("{}:nexus-{}", HOSTNQN, NEXUS_UUID);
-    nvme_connect("127.0.0.1", &nqn, true);
+    nvme_connect("127.0.0.1", &nqn).await.unwrap();
 
     // The first attempt will fail with "Duplicate cntlid x with y" error from
     // kernel
     for i in 0 .. 2 {
-        let status_c0 = nvme_connect(&ip0.to_string(), &nqn, false);
-        if i == 0 && status_c0.success() {
+        let status_c0 = nvme_connect(&ip0.to_string(), &nqn).await;
+        if i == 0 && status_c0.is_ok() {
             break;
         }
         assert!(
-            status_c0.success() || i != 1,
+            status_c0.is_ok() || i != 1,
             "failed to connect to remote nexus, {}",
-            status_c0
+            status_c0.err().unwrap().to_string()
         );
     }
 
@@ -241,7 +241,7 @@ async fn nexus_io_multipath() {
 
     // Connect to remote replica to check key registered
     let rep_nqn = format!("{}:{}", HOSTNQN, REPL_UUID);
-    nvme_connect(&ip0.to_string(), &rep_nqn, true);
+    nvme_connect(&ip0.to_string(), &rep_nqn).await.unwrap();
 
     let rep_dev = get_mayastor_nvme_device();
 
@@ -378,7 +378,7 @@ async fn nexus_io_resv_acquire() {
 
     // Connect to remote replica to check key registered
     let rep_nqn = format!("{}:{}", HOSTNQN, REPL_UUID);
-    nvme_connect(&ip0.to_string(), &rep_nqn, true);
+    nvme_connect(&ip0.to_string(), &rep_nqn).await.unwrap();
 
     let rep_dev = get_mayastor_nvme_device();
 
