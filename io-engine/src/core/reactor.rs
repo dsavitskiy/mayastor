@@ -37,7 +37,7 @@ use std::{
     os::raw::c_void,
     pin::Pin,
     slice::Iter,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use once_cell::sync::OnceCell;
@@ -180,10 +180,11 @@ impl Reactors {
             if unsafe { spdk_cpuset_get_cpu(mask, r.lcore) } {
                 let mt = spdk_rs::Thread::from_ptr(thread);
                 info!(
-                    "scheduled {} {:p} on core:{}",
+                    "scheduled '{}' ({:p}) on core #{} (total incoming spdk threads: {})",
                     mt.name(),
                     thread,
-                    r.lcore
+                    r.lcore,
+                    r.incoming.len() + 1,
                 );
                 r.incoming.push(mt);
                 return true;
@@ -483,9 +484,8 @@ impl Reactor {
         });
 
         drop(threads);
-        while let Some(i) = self.incoming.pop() {
-            self.threads.borrow_mut().push_back(i);
-        }
+
+        self.add_incoming();
     }
 
     /// poll the threads n times but only poll the futures queue once and look
@@ -497,16 +497,53 @@ impl Reactor {
         let threads = self.threads.borrow();
         for _ in 0 .. times {
             threads.iter().for_each(|t| {
-                t.poll();
+                self.checked_poll(t);
             });
         }
 
         self.receive_futures();
         self.run_futures();
+
         drop(threads);
 
+        self.add_incoming();
+    }
+
+    fn checked_poll(&self, t: &spdk_rs::Thread) {
+        let start = Instant::now();
+
+        t.poll();
+
+        let delta = Instant::now().saturating_duration_since(start);
+        if delta.as_millis() > 100 {
+            warn!(
+                "@@@@ core #{}: spdk_thread_pool() '{}': took too long: {} ms",
+                self.lcore,
+                t.name(),
+                delta.as_millis()
+            );
+        }
+    }
+
+    fn add_incoming(&self) {
+        let mut n = 0;
+
         while let Some(i) = self.incoming.pop() {
+            info!(
+                "@@@@ core #{}: adding incoming spdk thread: '{}'",
+                self.lcore,
+                i.name()
+            );
             self.threads.borrow_mut().push_back(i);
+            n += 1;
+        }
+
+        if n > 0 {
+            info!(
+                "@@@@ core #{}: new number of spdk threads: {}",
+                self.lcore,
+                self.threads.borrow().len()
+            );
         }
     }
 

@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     convert::TryFrom,
     ops::{Deref, DerefMut},
     os::raw::c_void,
@@ -75,6 +76,9 @@ pub(crate) struct TimeoutConfig {
     reset_attempts: u32,
     next_reset_time: Instant,
     destroy_in_progress: AtomicCell<bool>,
+    last_adminq_poll: RefCell<Option<Instant>>,
+    adminq_poll_cnt: RefCell<u64>,
+    adminq_interval_warn_threshold: Duration,
 }
 
 impl Drop for TimeoutConfig {
@@ -87,7 +91,8 @@ impl Drop for TimeoutConfig {
 /// providing fast and atomic access to it.
 impl TimeoutConfig {
     pub fn new(ctrlr: &str) -> Self {
-        Self {
+        let x = nvme_bdev_running_config().nvme_adminq_poll_period_us * 2;
+        let s = Self {
             name: String::from(ctrlr),
             timeout_action: AtomicCell::new(DeviceTimeoutAction::Ignore),
             reset_in_progress: AtomicCell::new(false),
@@ -95,7 +100,16 @@ impl TimeoutConfig {
             reset_attempts: MAX_RESET_ATTEMPTS,
             next_reset_time: Instant::now(),
             destroy_in_progress: AtomicCell::new(false),
-        }
+            last_adminq_poll: RefCell::new(None),
+            adminq_poll_cnt: RefCell::new(0),
+            adminq_interval_warn_threshold: Duration::from_micros(x),
+        };
+        info!(
+            "@@@@ new ctrlr: '{}', adminq interval warn treshold: {} us",
+            s.name,
+            s.adminq_interval_warn_threshold.as_micros()
+        );
+        s
     }
 
     fn as_ptr(&mut self) -> *mut c_void {
@@ -112,6 +126,33 @@ impl TimeoutConfig {
     }
 
     pub fn process_adminq(&self) -> i32 {
+        // // info!("#### adminq '{}' poll #{}", self.name,
+        // // self.adminq_poll_cnt.borrow());
+        // let yy = *self.adminq_poll_cnt.borrow();
+        // if yy > 400 && yy < 405 {
+        //     info!("#### adminq '{}' sleep poll #{}", self.name, yy);
+        //     std::thread::sleep(Duration::from_millis(500));
+        // }
+
+        let n = Instant::now();
+
+        if let Some(t) = *self.last_adminq_poll.borrow() {
+            let delta = n.saturating_duration_since(t);
+            if delta > self.adminq_interval_warn_threshold {
+                warn!(
+                    "@@@@ process_adminq: '{}' poll #{}: adminq poll stall: {} us, \
+                    must be <= {} us",
+                    self.name,
+                    self.adminq_poll_cnt.borrow(),
+                    delta.as_micros(),
+                    self.adminq_interval_warn_threshold.as_micros()
+                );
+            }
+        }
+
+        *self.last_adminq_poll.borrow_mut() = Some(n);
+        *self.adminq_poll_cnt.borrow_mut() += 1;
+
         unsafe {
             spdk_nvme_ctrlr_process_admin_completions(self.ctrlr.as_ptr())
         }
