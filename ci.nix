@@ -1,4 +1,4 @@
-{ nospdk ? false, norust ? false }:
+{ nospdk ? false, norust ? false, asan ? false }:
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {
@@ -55,7 +55,8 @@ mkShell {
     gnuplot
     libunwind
   ] ++ (if (nospdk) then [ libspdk-dev.buildInputs ] else [ libspdk-dev ])
-  ++ pkgs.lib.optional (!norust) channel.stable
+  ++ pkgs.lib.optional (!norust && asan) channel.asan
+  ++ pkgs.lib.optional (!norust && !asan) channel.stable
   ++ pkgs.lib.optional (!norust) channel.nightly;
 
   RUST_NIGHTLY_PATH = channel.nightly;
@@ -65,6 +66,10 @@ mkShell {
   SPDK_PATH = if nospdk then null else "${libspdk-dev}";
   ETCD_BIN = "${etcd}/bin/etcd";
 
+  RUSTFLAGS = if asan then "-Zsanitizer=address" else null;
+  RUST_BACKTRACE = if asan then "1" else null;
+  ASAN_OPTIONS = if asan then "detect_leaks=0" else null;
+
   shellHook = ''
     ${pkgs.lib.optionalString (nospdk) "cowsay ${nospdk_moth}"}
     ${pkgs.lib.optionalString (nospdk) "export CFLAGS=-msse4"}
@@ -72,6 +77,14 @@ mkShell {
     ${pkgs.lib.optionalString (norust) "cowsay ${norust_moth}"}
     ${pkgs.lib.optionalString (norust) "echo 'Hint: use rustup tool.'"}
     ${pkgs.lib.optionalString (norust) "echo"}
+    ${pkgs.lib.optionalString (asan) "echo 'AddressSanitizer is enabled, forcing nightly rustc.'"}
+    ${pkgs.lib.optionalString (asan) "echo '  RUSTFLAGS      =' $\{RUSTFLAGS\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  RUST_BACKTRACE =' $\{RUST_BACKTRACE\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  ASAN_OPTIONS   =' $\{ASAN_OPTIONS\}"}
+    ${pkgs.lib.optionalString (asan) "echo"}
+
+    echo 'Using' $(rustc --version)
+    echo
 
     # SRCDIR is needed by docker-compose files as it requires absolute paths
     export SRCDIR=`pwd`

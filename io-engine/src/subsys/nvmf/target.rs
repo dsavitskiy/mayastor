@@ -377,13 +377,13 @@ impl Target {
         let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
         let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
 
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_replica.as_ptr())
-        };
-
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_nexus.as_ptr())
-        };
+        // unsafe {
+        //     spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_replica.as_ptr())
+        // };
+        //
+        // unsafe {
+        //     spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_nexus.as_ptr())
+        // };
 
         unsafe {
             spdk_nvmf_tgt_destroy(

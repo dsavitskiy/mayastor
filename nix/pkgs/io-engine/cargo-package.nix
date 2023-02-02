@@ -30,8 +30,8 @@
 let
   channel = import ../../lib/rust.nix { inherit sources; };
   rustPlatform = makeRustPlatform {
-    rustc = channel.stable;
-    cargo = channel.stable;
+    rustc = channel.nightly;
+    cargo = channel.nightly;
   };
   whitelistSource = src: allowedPrefixes:
     builtins.filterSource
@@ -61,6 +61,7 @@ let
     LIBCLANG_PATH = "${llvmPackages_11.libclang.lib}/lib";
     PROTOC = "${protobuf}/bin/protoc";
     PROTOC_INCLUDE = "${protobuf}/include";
+    RUSTFLAGS = "-Zsanitizer=address";
 
     nativeBuildInputs = [ pkg-config protobuf llvmPackages_11.clang ];
     buildInputs = [

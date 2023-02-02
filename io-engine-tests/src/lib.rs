@@ -4,7 +4,7 @@
 //! panic macros. The caller can decide how to handle the error appropriately.
 //! Panics and asserts in this file are still ok for usage & programming errors.
 
-use std::{io, io::Write, process::Command, time::Duration};
+use std::{io, io::Write, path::PathBuf, process::Command, time::Duration};
 
 use crossbeam::channel::{after, select, unbounded};
 use once_cell::sync::OnceCell;
@@ -502,6 +502,15 @@ pub fn composer_init() {
     let path = std::path::PathBuf::from(std::env!("CARGO_MANIFEST_DIR"));
     let srcdir = path.parent().unwrap();
     composer::initialize(srcdir);
+
+    // "target/x86_64-unknown-linux-gnu/<debug|release|...>/deps/<bin>"
+    let bin_path = PathBuf::from(std::env::args_os().next().unwrap());
+    if let Ok(t) = bin_path.strip_prefix(&srcdir) {
+        let parts: Vec<_> = t.components().map(|s| s.as_os_str()).collect();
+        if parts.len() == 5 && parts[0] == "target" && parts[3] == "deps" {
+            composer::set_secondary_target_dir(Some(parts[1]));
+        }
+    }
 }
 
 /// Formats a serializable object as a JSON text.
