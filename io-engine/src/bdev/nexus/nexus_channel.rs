@@ -25,7 +25,7 @@ impl<'n> Debug for NexusChannel<'n> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "I/O chan '{nex}' core:{core}({cur}) [r:{r}/w:{w}/c:{c}]",
+            "I/O chan <{self:p}> '{nex}' core:{core}({cur}) [r:{r}/w:{w}/c:{c}]",
             nex = self.nexus.nexus_name(),
             core = self.core,
             cur = Cores::current(),

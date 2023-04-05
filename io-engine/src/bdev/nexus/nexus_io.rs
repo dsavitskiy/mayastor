@@ -57,7 +57,7 @@ mod debug_nexus_io {
 
 #[cfg(feature = "nexus-io-tracing")]
 macro_rules! trace_nexus_io {
-    ($($arg:tt)*) => {{ trace!($($arg)*); }}
+    ($($arg:tt)*) => {{ debug!($($arg)*); }}
 }
 
 #[cfg(not(feature = "nexus-io-tracing"))]
@@ -98,7 +98,7 @@ impl<'n> Debug for NioCtx<'n> {
             f,
             "{serial}[{re}{status:?} {sc}:{fc}{infl}]",
             re = if self.resubmits > 0 {
-                format!("re:{}", self.resubmits)
+                format!("re:{} ", self.resubmits)
             } else {
                 "".to_string()
             },
@@ -289,6 +289,13 @@ impl<'n> NexusBio<'n> {
         debug_assert_eq!(ctx.in_flight, 0);
         debug_assert!(ctx.failed > 0);
         debug_assert!(ctx.successful > 0);
+
+        // if ctx.resubmits == u8::MAX {
+        if ctx.resubmits == 4 {
+            error!("{self:?}: failing nexus I/O: reached max resubmits");
+            self.fail();
+            return;
+        }
 
         ctx.status = IoStatus::Pending;
         ctx.resubmits += 1;
@@ -675,14 +682,7 @@ impl<'n> NexusBio<'n> {
                     };
 
                     for d in devices {
-                        if let Err(e) =
-                            nexus.disconnect_device_from_channels(d.clone()).await
-                        {
-                            error!(
-                                "{}: failed to disconnect I/O channels: {:?}",
-                                d, e
-                            );
-                        }
+                        nexus.disconnect_device_from_channels(&d).await;
 
                         device_cmd_queue().enqueue(
                             DeviceCommand::RetireDevice {

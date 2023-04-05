@@ -930,98 +930,64 @@ impl<'n> Nexus<'n> {
         }
     }
 
+    async fn self_sleep(&self, msg: &str, ms: u64) {
+        warn!(">>>> SLEEP [{msg}] {self:?}");
+        crate::sleep::mayastor_sleep(std::time::Duration::from_millis(ms))
+            .await
+            .unwrap();
+        warn!(">>>> DONE [{msg}] {self:?}");
+    }
+
     /// Retires a child with the given device.
     async fn do_child_retire(
         mut self: Pin<&mut Self>,
-        device_name: String,
+        child_device: String,
     ) -> Result<(), Error> {
-        warn!("{:?}: retiring child device '{}'...", self, device_name);
+        warn!("{self:?}: retiring child device '{child_device}'...");
 
-        self.disconnect_device_from_channels(device_name.clone())
-            .await?;
+        // self.disconnect_device_from_channels(&child_device).await;
+        // self.self_sleep("BEFORE_PAUSE", 100).await;
 
-        debug!("{:?}: pausing...", self);
+        debug!("{self:?}: pausing...");
         self.as_mut().pause().await?;
-        debug!("{:?}: pausing ok", self);
+        debug!("{self:?}: pausing ok");
 
-        if let Some(child) = self.lookup_child_by_device(&device_name) {
-            let uri = child.uri();
+        self.disconnect_device_from_channels(&child_device).await;
+        // self.self_sleep("BEFORE_ENQ", 100).await;
 
-            // Schedule the deletion of the child eventhough etcd has not been
-            // updated yet we do not need to wait for that to
-            // complete anyway.
-            debug!("{:?}: enqueuing retire device '{}'", child, device_name);
-            device_cmd_queue().enqueue(DeviceCommand::RetireDevice {
-                nexus_name: self.name.clone(),
-                child_device: device_name.clone(),
-            });
+        // Schedule the deletion of the child eventhough etcd has not been
+        // updated yet we do not need to wait for that to
+        // complete anyway.
+        debug!("{self:?}: enqueuing retire device '{child_device}'");
+        device_cmd_queue().enqueue(DeviceCommand::RetireDevice {
+            nexus_name: self.name.clone(),
+            child_device: child_device.clone(),
+        });
 
-            // Do not persist child state in case it's the last healthy child of
-            // the nexus: let Control Plane reconstruct the nexus
-            // using this device as the replica with the most recent
-            // user data.
-            self.persist(PersistOp::UpdateCond {
-                child_uri: uri.to_owned(),
-                healthy: child.is_healthy(),
-                predicate: &|nexus_info| {
-                    // Determine the amount of healthy replicas in the persistent state and
-                    // check against the last healthy replica remaining.
-                    let num_healthy = nexus_info.children.iter().fold(0, |n, c| {
-                        if c.healthy {
-                            n + 1
-                        } else {
-                            n
-                        }
-                    });
+        self.self_sleep("BEFORE_PERSIST", 100).await;
 
-                    match num_healthy {
-                        0 => {
-                            warn!(
-                                "nexus {}: no healthy replicas persent in persistent store when retiring replica {}:
-                                not persisting the replica state",
-                                &device_name, uri,
-                            );
-                            false
-                        }
-                        1 => {
-                            warn!(
-                                "nexus {}: retiring the last healthy replica {}, not persisting the replica state",
-                                &device_name, uri,
-                            );
-                            false
-                        },
-                        _ => true,
-                    }
-                }
-            }).await;
+        // TODO
+        self.persist_update(&child_device).await;
 
-            debug!(
-                "{self:?}: retire device '{device_name}': \
-                persistent store updated"
-            );
-        } else {
-            error!(
-                "{:?}: child device to retire is not found: '{}'",
-                self, device_name
-            );
-        }
+        self.self_sleep("BEFORE_RESUME", 100).await;
 
-        debug!("{:?}: resuming...", self);
+        debug!("{self:?}: resuming...");
         self.as_mut().resume().await?;
-        debug!("{:?}: resuming ok", self);
+        debug!("{self:?}: resuming ok");
+
         Ok(())
     }
 
     // TODO
     pub(crate) async fn disconnect_device_from_channels(
         &self,
-        child_device: String,
-    ) -> Result<(), Error> {
+        child_device: &str,
+    ) {
         let (sender, r) = oneshot::channel::<bool>();
 
         let ctx = UpdateFailFastCtx {
             sender,
-            child_device: child_device.clone(),
+            child_device: child_device.to_owned(),
         };
 
         if self.has_io_device {
@@ -1044,7 +1010,68 @@ impl<'n> Nexus<'n> {
                 self, child_device
             );
         }
+    }
 
-        Ok(())
+    /// TODO
+    async fn persist_update(&self, child_device: &str) {
+        debug!(
+            "{self:?}: retire device '{child_device}': \
+            updating persistent store..."
+        );
+
+        let Some(child) = self.lookup_child_by_device(child_device) else {
+            warn!(
+                "{self:?}: persist update failed: child device \
+                '{child_device}' not found"
+            );
+            return;
+        };
+
+        let uri = child.uri();
+
+        // Do not persist child state in case it's the last healthy child of
+        // the nexus: let Control Plane reconstruct the nexus
+        // using this device as the replica with the most recent
+        // user data.
+        self.persist(PersistOp::UpdateCond {
+            child_uri: uri.to_owned(),
+            healthy: child.is_healthy(),
+            predicate: &|nexus_info| {
+                // Determine the amount of healthy replicas in the persistent
+                // state and check against the last healthy replica remaining.
+                let num_healthy = nexus_info.children.iter().fold(0, |n, c| {
+                    if c.healthy {
+                        n + 1
+                    } else {
+                        n
+                    }
+                });
+
+                match num_healthy {
+                    0 => {
+                        warn!(
+                            "{self:?}: no healthy replicas persent \
+                            in persistent store when retiring replica \
+                            '{uri}': not persisting the replica state",
+                        );
+                        false
+                    }
+                    1 => {
+                        warn!(
+                            "{self:?}: retiring the last healthy replica \
+                            '{uri}', not persisting the replica state",
+                        );
+                        false
+                    }
+                    _ => true,
+                }
+            },
+        })
+        .await;
+
+        debug!(
+            "{self:?}: retire device '{child_device}': \
+            persistent store updated"
+        );
     }
 }

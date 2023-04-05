@@ -92,7 +92,7 @@ impl<'n> NexusIoSubsystem<'n> {
             "NexusIoSubsystem::suspend() must called on the first core"
         );
 
-        trace!("{:?}: pausing I/O...", self);
+        debug!("#### {:?}: pausing I/O...", self);
 
         loop {
             let state = self.pause_state.compare_exchange(
@@ -114,8 +114,7 @@ impl<'n> NexusIoSubsystem<'n> {
                         if let Some(subsystem) =
                             NvmfSubsystem::nqn_lookup(&self.name)
                         {
-                            trace!(
-                                "{:?}: pausing subsystem '{}'...",
+                            debug!("#### {:?}: pausing subsystem '{}'...",
                                 self,
                                 subsystem.get_nqn()
                             );
@@ -128,8 +127,7 @@ impl<'n> NexusIoSubsystem<'n> {
                                 );
                             }
 
-                            trace!(
-                                "{:?}: subsystem '{}' paused",
+                            debug!("#### {:?}: subsystem '{}' paused",
                                 self,
                                 subsystem.get_nqn()
                             );
@@ -159,8 +157,7 @@ impl<'n> NexusIoSubsystem<'n> {
                 // operation.
                 Err(NexusPauseState::Unpausing)
                 | Err(NexusPauseState::Pausing) => {
-                    trace!(
-                        "{:?}: nexus is in intermediate state, \
+                    debug!("#### {:?}: nexus is in intermediate state, \
                             deferring pause operation",
                         self
                     );
@@ -169,8 +166,7 @@ impl<'n> NexusIoSubsystem<'n> {
                     self.pause_waiters.push_back(s);
                     r.await.unwrap();
 
-                    trace!(
-                        "{:?}: nexus completed state transition, \
+                    debug!("#### {:?}: nexus completed state transition, \
                         retrying pause operation",
                         self
                     );
@@ -183,11 +179,11 @@ impl<'n> NexusIoSubsystem<'n> {
 
         // Resume one waiter in case there are any.
         if let Some(w) = self.pause_waiters.pop_front() {
-            trace!("{:?}: resuming the first pause waiter", self);
+            debug!("#### {:?}: resuming the first pause waiter", self);
             w.send(0).expect("I/O subsystem pause waiter disappeared");
         }
 
-        trace!("{:?}: I/O paused", self);
+        debug!("#### {:?}: I/O paused", self);
         Ok(())
     }
 

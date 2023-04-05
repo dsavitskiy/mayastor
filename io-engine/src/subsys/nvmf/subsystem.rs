@@ -861,7 +861,7 @@ impl NvmfSubsystem {
         .await
     }
 
-    /// get ANA state
+    /// get ANA state§
     pub async fn get_ana_state(&self) -> Result<u32, Error> {
         let cfg = Config::get();
         let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);

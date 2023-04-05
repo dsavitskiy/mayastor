@@ -8,6 +8,7 @@ default-run = "io-engine-client"
 build = "build.rs"
 
 [features]
+default = ["io-engine-testing", "nexus-io-tracing"]
 io-engine-testing = ["nexus-fault-injection"]
 nexus-fault-injection = [] # Enables nexus-level fault injection code.
 nexus-io-tracing = [] # Enables nexus I/O tracing code.

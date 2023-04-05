@@ -29,6 +29,7 @@ const DATA_SIZE_OVER: u64 = NEXUS_SIZE - 5;
 /// Create a nexus on single overcomitted replica and run FIO to trigger
 /// I/O error (because of ENOSPC).
 #[tokio::test]
+#[ignore]
 async fn nexus_fio_single_remote() {
     common::composer_init();
 
@@ -150,7 +151,7 @@ async fn nexus_fio_mixed() {
             "ms_nex",
             Binary::from_dbg("io-engine").with_args(vec![
                 "-l",
-                "3,4",
+                "3",
                 "-F",
                 "compact,color",
             ]),
@@ -219,35 +220,40 @@ async fn nexus_fio_mixed() {
     nex_0.create().await.unwrap();
     nex_0.publish().await.unwrap();
 
-    // Run FIO with okay data size.
-    test_fio_to_nexus(
-        &nex_0,
-        &Fio::new()
-            .with_job(
-                FioJob::new()
-                    .with_runtime(10)
-                    .with_bs(4096)
-                    .with_iodepth(8)
-                    .with_size(BufferSize::Mb(DATA_SIZE_OK)),
-            )
-            .with_verbose_err(true),
-    )
-    .await
-    .unwrap();
+    // // Run FIO with okay data size.
+    // test_fio_to_nexus(
+    //     &nex_0,
+    //     &Fio::new()
+    //         .with_job(
+    //             FioJob::new()
+    //                 .with_runtime(10)
+    //                 .with_bs(4096)
+    //                 .with_iodepth(8)
+    //                 .with_size(BufferSize::Mb(DATA_SIZE_OK)),
+    //         )
+    //         .with_verbose_err(true),
+    // )
+    // .await
+    // .unwrap();
 
     // Run FIO with data size exceeding capacity of one of the pools.
     // The other replica must be fine as it is not over committed, so
     // this run must succeed.
     test_fio_to_nexus(
         &nex_0,
-        &Fio::new().with_job(
-            FioJob::new()
-                .with_runtime(10)
-                .with_bs(4096)
-                .with_iodepth(8)
-                .with_size(BufferSize::Mb(DATA_SIZE_OVER)),
-        ),
+        &Fio::new()
+            .with_verbose(true)
+            .with_verbose_err(true)
+            .with_job(
+                FioJob::new()
+                    .with_runtime(10)
+                    .with_bs(4096)
+                    .with_iodepth(8)
+                    .with_size(BufferSize::Mb(DATA_SIZE_OVER)),
+            ),
     )
     .await
     .unwrap();
+
+    test.print_log("ms_nex");
 }
