@@ -657,7 +657,8 @@ impl<'n> Nexus<'n> {
             }
 
             match partition::calc_data_partition(self.req_size(), nb, bs) {
-                Some((start, end)) => {
+                Some(p) => {
+                    let (start, end) = (p.data_start_blk(), p.data_end_blk());
                     if start_blk == 0 {
                         start_blk = start;
                         end_blk = end;

@@ -43,5 +43,6 @@ macro_rules! CPS_INIT {
 pub extern "C" fn cps_init() {
     subsys::register_subsystem();
     bdev::nexus::register_module();
+    bdev::array::register_module();
     bdev::null_ng::register();
 }

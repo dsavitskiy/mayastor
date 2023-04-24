@@ -15,6 +15,7 @@ pub(crate) mod dev;
 use crate::core::{MayastorEnvironment, PtplProps};
 pub(crate) use dev::uri;
 
+pub mod array;
 pub(crate) mod device;
 mod loopback;
 mod malloc;

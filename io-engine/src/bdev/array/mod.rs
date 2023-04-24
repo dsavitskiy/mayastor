@@ -1,0 +1,25 @@
+pub mod array_bdev;
+pub mod array_bdev_module;
+pub mod array_bdev_uri;
+pub mod array_common;
+pub mod array_device;
+pub mod array_device_desc;
+pub mod array_device_group;
+pub mod array_error;
+pub mod array_io;
+pub mod array_span;
+pub mod array_span_desc;
+
+pub use array_bdev::{ArrayBdev, ArrayChannelData};
+pub(crate) use array_bdev_module::register_module;
+pub use array_bdev_module::{ARRAY_BDEV_MODULE_NAME, ARRAY_BDEV_PRODUCT_ID};
+pub use array_bdev_uri::ArrayBdevUri;
+pub use array_common::{Array, ArrayDesc, ArrayParams, ArrayState};
+pub use array_device::ArrayDevice;
+pub use array_device_desc::ArrayDeviceDesc;
+pub use array_device_group::ArrayDeviceGroup;
+pub use array_error::ArrayError;
+use array_io::ArrayBdevIoCtx;
+pub use array_io::ArrayIo;
+pub use array_span::ArraySpan;
+use array_span_desc::ArraySpanDesc;

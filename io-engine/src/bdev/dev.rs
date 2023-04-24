@@ -39,6 +39,7 @@ pub(crate) mod uri {
     use crate::{
         bdev::{
             aio,
+            array,
             loopback,
             malloc,
             null_bdev,
@@ -59,6 +60,7 @@ pub(crate) mod uri {
 
         match url.scheme() {
             "aio" => Ok(Box::new(aio::Aio::try_from(&url)?)),
+            "array" => Ok(Box::new(array::ArrayBdevUri::try_from(&url)?)),
             "bdev" => Ok(Box::new(loopback::Loopback::try_from(&url)?)),
             "loopback" => Ok(Box::new(loopback::Loopback::try_from(&url)?)),
             "malloc" => Ok(Box::new(malloc::Malloc::try_from(&url)?)),
