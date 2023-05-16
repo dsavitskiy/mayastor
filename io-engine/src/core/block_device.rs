@@ -144,6 +144,30 @@ pub trait BlockDeviceHandle {
     /// TODO
     fn dma_malloc(&self, size: u64) -> Result<DmaBuf, DmaError>;
 
+    /// Allocates a DMA buffer with the size properly adjusted to the next block
+    /// boundary.
+    fn dma_malloc_adjusted(&self, size: u64) -> Result<DmaBuf, DmaError> {
+        let block_len = self.get_device().block_len();
+        let size = block_len * ((size / block_len) + 1);
+        self.dma_malloc(size)
+    }
+
+    /// Allocates a DMA buffer and copies bytes from a buffer.
+    /// DMA buffer size is adjusted to the next block boundary.
+    fn dma_buf_from(&self, src: &[u8]) -> Result<DmaBuf, DmaError> {
+        let mut dma = self.dma_malloc_adjusted(src.len() as u64)?;
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                src.as_ptr(),
+                dma.as_mut_slice().as_mut_ptr(),
+                src.len(),
+            );
+        }
+
+        Ok(dma)
+    }
+
     // Futures-based I/O functions.
 
     /// TODO

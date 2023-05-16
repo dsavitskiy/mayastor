@@ -12,6 +12,7 @@ mod nexus_bdev_rebuild;
 mod nexus_bdev_snapshot;
 mod nexus_channel;
 mod nexus_child;
+mod nexus_metadata;
 mod nexus_injection;
 mod nexus_io;
 mod nexus_io_log;

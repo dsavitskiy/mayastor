@@ -331,6 +331,23 @@ pub fn thread() -> Mthread {
     Mthread::primary()
 }
 
+pub fn dd_urandom_blkdev_test(device: &str) -> i32 {
+    let (exit, stdout, stderr) = run_script::run(
+        r#"
+        dd if=/dev/urandom of=$1 oflag=direct bs=512 count=1 seek=6144
+    "#,
+        &vec![device.into()],
+        &run_script::ScriptOptions::new(),
+    )
+    .unwrap();
+    tracing::debug!(
+        "dd_urandom_blkdev:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    exit
+}
+
 pub fn dd_urandom_blkdev(device: &str) -> i32 {
     let (exit, stdout, stderr) = run_script::run(
         r#"

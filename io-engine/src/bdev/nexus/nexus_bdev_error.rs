@@ -4,6 +4,7 @@ use tonic::{Code, Status};
 
 use super::{
     nexus_injection::InjectionError,
+    nexus_metadata,
     ChildError,
     NbdError,
     NexusPauseState,
@@ -224,6 +225,11 @@ pub enum Error {
     InvalidReservation { reservation: u8 },
     #[snafu(display("failed to update share properties {}", name))]
     UpdateShareProperties { source: CoreError, name: String },
+    #[snafu(display("Nexus '{name}': metadata error"))]
+    MetadataError {
+        source: nexus_metadata::metadata::Error,
+        name: String,
+    },
 }
 
 impl From<NvmfError> for Error {

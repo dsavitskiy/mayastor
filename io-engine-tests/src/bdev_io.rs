@@ -53,3 +53,32 @@ pub async fn write_zeroes_some(
     h.write_zeroes_at(offset, len).await?;
     Ok(())
 }
+
+pub async fn read_some_safe(
+    nexus_name: &str,
+    offset: u64,
+    fill: u8,
+) -> Result<bool, CoreError> {
+    let h = UntypedBdevHandle::open(nexus_name, true, false)?;
+
+    let buflen = u64::from(h.get_bdev().block_len() * 2);
+    let mut buf = h.dma_malloc(buflen).expect("failed to allocate buffer");
+    let slice = buf.as_mut_slice();
+
+    assert_eq!(slice[0], 0);
+    slice[512] = fill;
+    assert_eq!(slice[512], fill);
+
+    let len = h.read_at(offset, &mut buf).await?;
+    assert_eq!(len, buflen);
+
+    let slice = buf.as_slice();
+
+    for &it in slice.iter().take(512) {
+        if it != fill {
+            println!("Expected to read {fill}, found {it}");
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}

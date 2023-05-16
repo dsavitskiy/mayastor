@@ -214,6 +214,7 @@ impl<'n> Nexus<'n> {
                     self.as_mut().child_add_unsafe(child);
                 }
 
+                self.update_metadata().await;
                 self.persist(PersistOp::AddChild {
                     child_uri,
                     healthy,
@@ -286,6 +287,7 @@ impl<'n> Nexus<'n> {
             unsafe {
                 self.as_mut().child_remove_at_unsafe(idx);
             }
+            self.update_metadata().await;
             self.persist(PersistOp::RemoveChild {
                 child_uri: uri.to_string(),
             })
@@ -916,12 +918,18 @@ impl<'n> Nexus<'n> {
     ) -> Result<(), Error> {
         warn!("{self:?}: retiring child device '{device_name}'...");
 
+        // ETCD-RACE: disconnect and write to meta
+        self.update_metadata().await;
         self.disconnect_device_from_channels(device_name.clone())
             .await?;
+
+        // ETCD-RACE: after d'conn, we'll report okay to all outstanding write I/Os
 
         debug!("{self:?}: retire: pausing...");
         self.as_mut().pause().await?;
         debug!("{self:?}: retire: pausing ok");
+
+        // ETCD-RACE: now okay to write ETCD
 
         if let Some(child) = self.lookup_child_by_device(&device_name) {
             // Cancel rebuild job for this child, if any.

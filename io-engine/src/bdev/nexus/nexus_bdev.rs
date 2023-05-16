@@ -40,7 +40,7 @@ use crate::{
         nexus::{nexus_persistence::PersistentNexusInfo, NexusIoSubsystem},
     },
     core::{
-        partition,
+        partition::Partitions,
         Bdev,
         BdevHandle,
         CoreError,
@@ -474,6 +474,11 @@ impl<'n> Nexus<'n> {
         self.initiators.lock().len()
     }
 
+    /// Gets the state of the Nexus.
+    pub(crate) fn state(&self) -> NexusState {
+        self.state.lock().clone()
+    }
+
     /// Sets the state of the Nexus.
     fn set_state(self: Pin<&mut Self>, state: NexusState) -> NexusState {
         debug!("{:?}: changing state to '{}'", self, state);
@@ -667,8 +672,9 @@ impl<'n> Nexus<'n> {
                 });
             }
 
-            match partition::calc_data_partition(self.req_size(), nb, bs) {
-                Some((start, end)) => {
+            match Partitions::calculate(self.req_size(), nb, bs) {
+                Some(p) => {
+                    let (start, end) = (p.data_start_blk(), p.data_end_blk());
                     if start_blk == 0 {
                         start_blk = start;
                         end_blk = end;
@@ -747,20 +753,38 @@ impl<'n> Nexus<'n> {
 
         match nex.as_mut().try_open_children().await {
             Ok(_) => {
-                info!("{:?}: children opened successfully", nex);
+                info!("{nex:?}: children opened successfully");
             }
             Err(err) => {
-                error!("{:?} failed to open children: {}", nex, err.verbose());
+                error!("{nex:?} failed to open children: {}", err.verbose());
                 bdev.unregister_bdev();
                 return Err(err);
             }
         };
 
+        // ETCD-RACE: Validate child meta
+        nex.validate_children_metadata().await;
+
+        if nex.children.is_empty() {
+            error!("{nex:?}: no children !!!");
+            let name = nex.name.clone();
+
+            bdev.unregister_bdev();
+
+            return Err(Error::NexusIncomplete {
+                name,
+                reason: "No children".to_string(),
+            });
+        }
+
         // Persist the fact that the nexus is now successfully open.
         // We have to do this before setting the nexus to open so that
         // nexus list does not return this nexus until it is persisted.
+        nex.update_metadata().await;
         nex.persist(PersistOp::Create).await;
+        info!("{:?}: nexus bdev is now open", nex);
         nex.as_mut().set_state(NexusState::Open);
+        nex.update_metadata().await;
         info!("{:?}: nexus bdev registered successfully", nex);
 
         Ok(())
@@ -789,6 +813,9 @@ impl<'n> Nexus<'n> {
         for child in child_uris {
             self.as_mut().cancel_rebuild_jobs(&child).await;
         }
+
+        println!("@@@@ {self:?}: SAVE META BEFORE CLOSING CHLD");
+        self.update_metadata().await;
 
         info!("{:?}: closing {} children...", self, self.children.len());
         for child in self.children_iter() {
@@ -949,6 +976,7 @@ impl<'n> Nexus<'n> {
         self.close_children().await;
 
         // Step 4: Mark nexus as being properly shutdown in ETCd.
+        self.update_metadata().await;
         self.persist(PersistOp::Shutdown).await;
 
         // Finally, mark nexus as being fully shutdown.

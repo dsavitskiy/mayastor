@@ -285,10 +285,10 @@ pub struct NexusChild<'c> {
     ///
     /// TODO: we don't rename this field due to possible issues with
     /// TODO: child serialized state.
-    name: String,
+    pub(super) name: String,
     /// Underlying block device.
     #[serde(skip_serializing)]
-    device: Option<Box<dyn BlockDevice>>,
+    pub(super) device: Option<Box<dyn BlockDevice>>,
     /// TODO
     #[serde(skip_serializing)]
     device_descriptor: Option<Box<dyn BlockDeviceDescriptor>>,

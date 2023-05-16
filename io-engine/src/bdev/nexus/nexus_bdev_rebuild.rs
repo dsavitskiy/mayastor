@@ -391,6 +391,7 @@ impl<'n> Nexus<'n> {
                     let child_uri = child_uri.to_owned();
                     let healthy = c.is_healthy();
                     // todo: shouldn't we do this with the subsystem paused?
+                    self.update_metadata().await;
                     self.persist(PersistOp::Update {
                         child_uri,
                         healthy,
