@@ -25,7 +25,7 @@
 
 use std::{cmp::min, pin::Pin};
 
-use futures::{channel::oneshot, future::join_all};
+use futures::future::join_all;
 use snafu::ResultExt;
 
 use super::{
@@ -37,13 +37,16 @@ use super::{
     FaultReason,
     IOLogChannel,
     Nexus,
-    NexusChannel,
     NexusChild,
+    NexusIOMode,
     NexusOperation,
     NexusState,
     NexusStatus,
     PersistOp,
 };
+
+#[allow(unused_imports)]
+use super::nexus_injection::InjectionOp;
 
 use crate::{
     bdev::{dev::device_name, device_create, device_destroy, device_lookup},
@@ -719,29 +722,6 @@ impl<'n> DeviceEventListener for Nexus<'n> {
     }
 }
 
-/// TODO
-struct UpdateFailFastCtx {
-    sender: oneshot::Sender<bool>,
-    child_device: String,
-}
-
-/// TODO
-fn update_failfast_cb(
-    channel: &mut NexusChannel,
-    ctx: &mut UpdateFailFastCtx,
-) -> ChannelTraverseStatus {
-    channel.disconnect_device(&ctx.child_device);
-    ChannelTraverseStatus::Ok
-}
-
-/// TODO
-fn update_failfast_done(
-    _status: ChannelTraverseStatus,
-    ctx: UpdateFailFastCtx,
-) {
-    ctx.sender.send(true).expect("Receiver disappeared");
-}
-
 impl<'n> Nexus<'n> {
     /// Faults the device by its name, with the given fault reason.
     /// The faulted device is scheduled to be retired.
@@ -810,12 +790,12 @@ impl<'n> Nexus<'n> {
         // and the I/O would end up logged.
         if has_io_log {
             self.traverse_io_channels(
+                (),
                 |chan, _| {
                     chan.reconnect_io_logs();
                     ChannelTraverseStatus::Ok
                 },
                 |_, _| {},
-                (),
             );
 
             c.io_log_channel()
@@ -858,180 +838,185 @@ impl<'n> Nexus<'n> {
         }
     }
 
-    /// Retire a child for this nexus.
+    /// Retires a child device for the given nexus.
     async fn child_retire_routine(
         nexus_name: String,
-        child_device: String,
+        dev: String,
         retry: bool,
     ) {
-        if let Some(mut nexus) = nexus_lookup_mut(&nexus_name) {
-            // Error indicates it is already paused and another
-            // thread is processing the fault
-            if let Err(err) =
-                nexus.as_mut().do_child_retire(child_device.clone()).await
-            {
-                if retry {
-                    warn!(
-                        "{nexus:?}: retire failed (double pause), \
-                        retrying: {err}",
-                        err = err.verbose()
-                    );
-
-                    assert!(Reactors::is_master());
-
-                    Reactors::current().send_future(
-                        Nexus::child_retire_routine(
-                            nexus_name,
-                            child_device,
-                            retry,
-                        ),
-                    );
-                } else {
-                    warn!(
-                        "{nexus:?}: retire failed (double pause): {err}",
-                        err = err.verbose()
-                    );
-                }
-                return;
-            }
-
-            if matches!(nexus.status(), NexusStatus::Faulted) {
-                error!(
-                    "{nexus:?}: failed to retire '{child_device}': \
-                    nexus is faulted"
-                );
-            }
-        } else {
+        let Some(mut nex) = nexus_lookup_mut(&nexus_name) else {
             warn!(
-                "Nexus '{nexus_name}': retiring device '{child_device}': \
+                "Nexus '{nexus_name}': retiring device '{dev}': \
                 nexus already gone"
             );
+            return;
+        };
+
+        // Error indicates it is already paused and another
+        // thread is processing the fault
+        if let Err(err) = nex.as_mut().do_child_retire(dev.clone()).await {
+            if retry {
+                warn!(
+                    "{nex:?}: retire failed (double pause), retrying: {err}",
+                    err = err.verbose()
+                );
+
+                assert!(Reactors::is_master());
+
+                Reactors::current().send_future(Nexus::child_retire_routine(
+                    nexus_name, dev, retry,
+                ));
+            } else {
+                warn!(
+                    "{nex:?}: retire failed (double pause): {err}",
+                    err = err.verbose()
+                );
+            }
+            return;
+        }
+
+        if matches!(nex.status(), NexusStatus::Faulted) {
+            error!("{nex:?}: failed to retire '{dev}': nexus is faulted");
         }
     }
 
     /// Retires a child with the given device.
     async fn do_child_retire(
         mut self: Pin<&mut Self>,
-        device_name: String,
+        dev: String,
     ) -> Result<(), Error> {
-        warn!("{self:?}: retiring child device '{device_name}'...");
+        warn!("{self:?}: retiring child device '{dev}'...");
 
-        self.disconnect_device_from_channels(device_name.clone())
-            .await?;
+        self.child_retire_persist(&dev).await;
+
+        self.disconnect_device(&dev).await;
 
         debug!("{self:?}: retire: pausing...");
         self.as_mut().pause().await?;
         debug!("{self:?}: retire: pausing ok");
 
-        if let Some(child) = self.lookup_child_by_device(&device_name) {
-            // Cancel rebuild job for this child, if any.
-            if let Some(job) = child.rebuild_job() {
-                debug!("{self:?}: retire: stopping rebuild job...");
-                job.terminate().await.ok();
-                debug!("{self:?}: retire: rebuild job stopped");
-            }
-
-            let uri = child.uri();
-
-            // Schedule the deletion of the child eventhough etcd has not been
-            // updated yet we do not need to wait for that to
-            // complete anyway.
-            debug!(
-                "{child:?}: retire: enqueuing device '{device_name}' to retire"
-            );
-            device_cmd_queue().enqueue(DeviceCommand::RetireDevice {
-                nexus_name: self.name.clone(),
-                child_device: device_name.clone(),
-            });
-
-            // Do not persist child state in case it's the last healthy child of
-            // the nexus: let Control Plane reconstruct the nexus
-            // using this device as the replica with the most recent
-            // user data.
-            self.persist(PersistOp::UpdateCond {
-                child_uri: uri.to_owned(),
-                healthy: child.is_healthy(),
-                predicate: &|nexus_info| {
-                    // Determine the amount of healthy replicas in the persistent state and
-                    // check against the last healthy replica remaining.
-                    let num_healthy = nexus_info.children.iter().fold(0, |n, c| {
-                        if c.healthy {
-                            n + 1
-                        } else {
-                            n
-                        }
-                    });
-
-                    match num_healthy {
-                        0 => {
-                            warn!(
-                                "nexus {}: no healthy replicas persent in persistent store when retiring replica {}:
-                                not persisting the replica state",
-                                &device_name, uri,
-                            );
-                            false
-                        }
-                        1 => {
-                            warn!(
-                                "nexus {}: retiring the last healthy replica {}, not persisting the replica state",
-                                &device_name, uri,
-                            );
-                            false
-                        },
-                        _ => true,
-                    }
-                }
-            }).await;
-
-            debug!(
-                "{self:?}: retire device '{device_name}': \
-                persistent store updated"
-            );
-        } else {
-            error!(
-                "{self:?}: child device to retire is not found: '{device_name}'"
-            );
-        }
+        self.child_retire_destroy_device(&dev).await;
+        // self.child_retire_persist(&dev).await;
 
         debug!("{self:?}: resuming...");
         self.as_mut().resume().await?;
         debug!("{self:?}: resuming ok");
+
         Ok(())
     }
 
-    // TODO
-    pub(crate) async fn disconnect_device_from_channels(
-        &self,
-        child_device: String,
-    ) -> Result<(), Error> {
-        let (sender, r) = oneshot::channel::<bool>();
-
-        let ctx = UpdateFailFastCtx {
-            sender,
-            child_device: child_device.clone(),
+    /// TODO
+    async fn child_retire_destroy_device(&self, dev: &str) {
+        let Some(child) = self.lookup_child_by_device(dev) else {
+            error!("{self:?}: child device to retire is not found: '{dev}'");
+            return;
         };
 
-        if self.has_io_device {
-            info!(
-                "{:?}: disconnecting all channels from '{}'...",
-                self, child_device
-            );
-
-            self.traverse_io_channels(
-                update_failfast_cb,
-                update_failfast_done,
-                ctx,
-            );
-
-            r.await
-                .expect("disconnect_all_children() sender already dropped");
-
-            info!(
-                "{:?}: device '{}' disconnected from all I/O channels",
-                self, child_device
-            );
+        // Cancel rebuild job for this child, if any.
+        if let Some(job) = child.rebuild_job() {
+            debug!("{self:?}: retire: stopping rebuild job...");
+            job.terminate().await.ok();
+            debug!("{self:?}: retire: rebuild job stopped");
         }
 
-        Ok(())
+        debug!("{child:?}: retire: enqueuing device '{dev}' to retire");
+
+        device_cmd_queue().enqueue(DeviceCommand::RetireDevice {
+            nexus_name: self.name.clone(),
+            child_device: dev.to_string(),
+        });
+    }
+
+    /// TODO
+    async fn child_retire_persist(&self, dev: &str) {
+        let Some(child) = self.lookup_child_by_device(dev) else {
+            error!("{self:?}: child device to retire is not found: '{dev}'");
+            return;
+        };
+
+        self.control_nexus_io(NexusIOMode::Suspended).await;
+
+        let uri = child.uri();
+
+        // Do not persist child state in case it's the last healthy child of
+        // the nexus: let Control Plane reconstruct the nexus
+        // using this device as the replica with the most recent
+        // user data.
+        debug!("{self:?}: retire device '{dev}': updating persistent store...");
+
+        // #[cfg(feature = "nexus-fault-injection")]
+        // if self.inject_error(dev, InjectionOp::RetirePersist) {
+        //     warn!("{self:?}: retire persist skipped due to injection");
+        //     return;
+        // }
+
+        self.persist(PersistOp::UpdateCond {
+            child_uri: uri.to_owned(),
+            healthy: child.is_healthy(),
+            predicate: &|nexus_info| {
+                // Determine the amount of healthy replicas in the persistent state and
+                // check against the last healthy replica remaining.
+                let num_healthy = nexus_info.children.iter().fold(0, |n, c| {
+                    if c.healthy {
+                        n + 1
+                    } else {
+                        n
+                    }
+                });
+
+                match num_healthy {
+                    0 => {
+                        warn!(
+                            "nexus {}: no healthy replicas persent in persistent store when retiring replica {}:
+                            not persisting the replica state",
+                            &dev, uri,
+                        );
+                        false
+                    }
+                    1 => {
+                        warn!(
+                            "nexus {}: retiring the last healthy replica {}, not persisting the replica state",
+                            &dev, uri,
+                        );
+                        false
+                    },
+                    _ => true,
+                }
+            }
+        }).await;
+
+        debug!("{self:?}: retire device '{dev}': persistent store updated");
+
+        self.control_nexus_io(NexusIOMode::Running).await;
+    }
+
+    /// Disconnects a device from all I/O channels.
+    pub(crate) async fn disconnect_device(&self, dev: &str) {
+        if !self.has_io_device {
+            return;
+        }
+
+        info!("{self:?}: disconnecting all channels from '{dev}'...");
+
+        self.traverse_io_channels_async(dev, |channel, dev| {
+            channel.disconnect_device(&dev);
+        })
+        .await;
+
+        info!("{self:?}: '{dev}' disconnected from all I/O channels");
+    }
+
+    /// TODO
+    async fn control_nexus_io(&self, mode: NexusIOMode) {
+        if self.has_io_device {
+            info!("{self:?}: control Nexus I/O: {mode:?}...");
+
+            self.traverse_io_channels_async(mode, |channel, mode| {
+                channel.set_io_mode(*mode);
+            })
+            .await;
+
+            info!("{self:?}: control Nexus I/O: {mode:?} done");
+        }
     }
 }

@@ -44,6 +44,7 @@ pub enum InjectionOp {
     ReadSubmission,
     Write,
     WriteSubmission,
+    RetirePersist,
 }
 
 #[cfg(feature = "nexus-fault-injection")]
@@ -86,6 +87,7 @@ mod inj_impl {
             "sread" => InjectionOp::ReadSubmission,
             "write" => InjectionOp::Write,
             "swrite" => InjectionOp::WriteSubmission,
+            "retire_persist" => InjectionOp::RetirePersist,
             _ => {
                 return Err(InjectionError::UnknownParameter {
                     name: k.to_string(),
@@ -385,6 +387,19 @@ mod inj_impl {
             self.injections.items.lock().iter_mut().any(|inj| {
                 inj.is_applied(dev, op, offset .. offset + num_blocks)
             })
+        }
+
+        /// TODO
+        pub fn inject_error(&self, dev: &str, op: InjectionOp) -> bool {
+            if !injections_enabled() {
+                return false;
+            }
+
+            self.injections
+                .items
+                .lock()
+                .iter()
+                .any(|inj| inj.op == op && inj.name == dev)
         }
     }
 }

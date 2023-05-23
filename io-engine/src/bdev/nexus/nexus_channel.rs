@@ -4,9 +4,12 @@ use std::{
     cell::UnsafeCell,
     fmt::{Debug, Display, Formatter},
     pin::Pin,
+    ptr::NonNull,
 };
 
-use super::{FaultReason, IOLogChannel, Nexus};
+use spdk_rs::libspdk::spdk_bdev_io;
+
+use super::{FaultReason, IOLogChannel, Nexus, NexusBio};
 
 use crate::core::{BlockDeviceHandle, CoreError, Cores};
 
@@ -18,6 +21,8 @@ pub struct NexusChannel<'n> {
     io_logs: Vec<IOLogChannel>,
     previous_reader: UnsafeCell<usize>,
     fail_fast: u32,
+    io_mode: NexusIOMode,
+    suspended_ios: Vec<NonNull<spdk_bdev_io>>,
     nexus: Pin<&'n mut Nexus<'n>>,
     core: u32,
 }
@@ -36,6 +41,13 @@ impl<'n> Debug for NexusChannel<'n> {
             c = self.nexus.child_count(),
         )
     }
+}
+
+/// TODO
+#[derive(Debug, Copy, Clone)]
+pub(crate) enum NexusIOMode {
+    Running,
+    Suspended,
 }
 
 #[derive(Debug)]
@@ -94,6 +106,8 @@ impl<'n> NexusChannel<'n> {
             previous_reader: UnsafeCell::new(0),
             nexus: unsafe { nexus.pinned_mut() },
             fail_fast: 0,
+            io_mode: NexusIOMode::Running,
+            suspended_ios: Vec::new(),
             core: Cores::current(),
         }
     }
@@ -263,5 +277,36 @@ impl<'n> NexusChannel<'n> {
     /// Returns core on which channel was created.
     pub fn core(&self) -> u32 {
         self.core
+    }
+
+    /// TODO
+    pub(super) fn set_io_mode(&mut self, io_mode: NexusIOMode) {
+        self.io_mode = io_mode;
+        debug!("{self:?}: I/O mode change to: {io_mode:?}");
+        if matches!(self.io_mode, NexusIOMode::Running) {
+            let mut v = Vec::new();
+            std::mem::swap(&mut v, &mut self.suspended_ios);
+
+            debug!(
+                "{self:?}: resubmitting {n} suspended I/Os ...",
+                n = v.len()
+            );
+
+            v.into_iter().for_each(|io| {
+                let io = NexusBio::from(io.as_ptr());
+                debug!("==== RE: {io:?}");
+                io.submit_request();
+            });
+        }
+    }
+
+    /// TODO
+    pub(super) fn is_suspended(&self) -> bool {
+        matches!(self.io_mode, NexusIOMode::Suspended)
+    }
+
+    /// TODO
+    pub(super) fn suspend_io(&mut self, io: *mut spdk_bdev_io) {
+        self.suspended_ios.push(NonNull::new(io).unwrap())
     }
 }

@@ -185,6 +185,12 @@ impl<'n> NexusBio<'n> {
 
     /// TODO
     pub(super) fn submit_request(mut self) {
+        if self.channel().is_suspended() {
+            let p = self.legacy_as_ptr();
+            self.channel_mut().suspend_io(p);
+            return;
+        }
+
         if let Err(_e) = match self.io_type() {
             IoType::Read => self.readv(),
             // these IOs are submitted to all the underlying children
@@ -686,21 +692,13 @@ impl<'n> NexusBio<'n> {
                     }
 
                     // 1: Close I/O channels for all children.
-                    for d in nexus.child_devices() {
-                        if let Err(e) = nexus
-                            .disconnect_device_from_channels(d.clone())
-                            .await
-                        {
-                            error!(
-                                "{}: failed to disconnect I/O channels: {:?}",
-                                d, e
-                            );
-                        }
+                    for dev in nexus.child_devices() {
+                        nexus.disconnect_device(&dev).await;
 
                         device_cmd_queue().enqueue(
                             DeviceCommand::RetireDevice {
                                 nexus_name: nexus.name.clone(),
-                                child_device: d.clone(),
+                                child_device: dev.clone(),
                             },
                         );
                     }

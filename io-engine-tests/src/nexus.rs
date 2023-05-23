@@ -8,6 +8,7 @@ use super::{
             ChildState,
             ChildStateReason,
             CreateNexusRequest,
+            DestroyNexusRequest,
             InjectNexusFaultRequest,
             InjectedFault,
             ListInjectedNexusFaultsRequest,
@@ -177,6 +178,18 @@ impl NexusBuilder {
             .map(|r| r.into_inner().nexus.unwrap())
     }
 
+    pub async fn destroy(&mut self) -> Result<(), Status> {
+        self.rpc()
+            .lock()
+            .await
+            .nexus
+            .destroy_nexus(DestroyNexusRequest {
+                uuid: self.uuid(),
+            })
+            .await
+            .map(|_| ())
+    }
+
     pub async fn publish(&self) -> Result<Nexus, Status> {
         self.rpc()
             .lock()
@@ -309,6 +322,26 @@ impl NexusBuilder {
             .map(|r| r.into_inner().injections)
     }
 
+    pub async fn inject_fault_at_replica(
+        &self,
+        r: &ReplicaBuilder,
+        inj_params: &str,
+    ) -> Result<String, Status> {
+        let child = self.get_nexus_replica_child(r).await?;
+
+        let dev = child.device_name.as_ref().ok_or_else(|| {
+            Status::new(
+                Code::Unavailable,
+                format!("Child '{uri}' is closed", uri = child.uri),
+            )
+        })?;
+
+        let inj_uri = format!("inject://{dev}?{inj_params}",);
+        self.inject_nexus_fault(&inj_uri).await?;
+
+        Ok(inj_uri)
+    }
+
     pub async fn get_rebuild_history(
         &self,
     ) -> Result<Vec<RebuildHistoryRecord>, Status> {
@@ -347,9 +380,8 @@ impl NexusBuilder {
                 Status::new(
                     Code::NotFound,
                     format!(
-                        "Child '{}' not found on nexus '{}'",
-                        child_uri,
-                        self.uuid()
+                        "Child '{child_uri}' not found on nexus '{nex}'",
+                        nex = self.uuid()
                     ),
                 )
             })
