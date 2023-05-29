@@ -25,7 +25,12 @@ use super::{
     file_io::DataSize,
     fio::Fio,
     generate_uuid,
-    nvmf::{test_fio_to_nvmf, test_write_to_nvmf, NvmfLocation},
+    nvmf::{
+        test_fio_to_nvmf,
+        test_fio_to_nvmf_aio,
+        test_write_to_nvmf,
+        NvmfLocation,
+    },
     replica::ReplicaBuilder,
 };
 use io_engine::{constants::NVME_NQN_PREFIX, subsys::make_subsystem_serial};
@@ -74,8 +79,7 @@ impl NexusBuilder {
 
     pub fn with_uuid(mut self, uuid: &str) -> Self {
         self.uuid = Some(uuid.to_owned());
-        let u = uuid::Uuid::parse_str(uuid).unwrap();
-        self.serial = Some(make_subsystem_serial(u.as_bytes()));
+        self.serial = Some(make_nexus_serial(uuid));
         self
     }
 
@@ -139,7 +143,7 @@ impl NexusBuilder {
     }
 
     pub fn nqn(&self) -> String {
-        format!("{}:{}", NVME_NQN_PREFIX, self.name.as_ref().unwrap())
+        make_nexus_nqn(self.name.as_ref().unwrap())
     }
 
     /// Returns NVMe serial for this Nexus.
@@ -485,7 +489,26 @@ pub async fn test_write_to_nexus(
 /// TODO
 pub async fn test_fio_to_nexus(
     nex: &NexusBuilder,
-    fio: &Fio,
+    fio: Fio,
 ) -> std::io::Result<()> {
     test_fio_to_nvmf(&nex.nvmf_location(), fio).await
+}
+
+/// TODO
+pub async fn test_fio_to_nexus_aio(
+    nex: &NexusBuilder,
+    fio: Fio,
+) -> std::io::Result<()> {
+    test_fio_to_nvmf_aio(&nex.nvmf_location(), fio).await
+}
+
+/// Creates a nexus serial from its UUID.
+pub fn make_nexus_serial(uuid: &str) -> String {
+    let u = uuid::Uuid::parse_str(uuid).unwrap();
+    make_subsystem_serial(u.as_bytes())
+}
+
+/// Creates a nexus NQN from nexus name.
+pub fn make_nexus_nqn(name: &str) -> String {
+    format!("{}:{}", NVME_NQN_PREFIX, name)
 }

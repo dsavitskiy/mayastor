@@ -16,6 +16,7 @@ use tracing::{error, info, trace};
 use io_engine::{
     core::{MayastorEnvironment, Mthread},
     logger,
+    logger::LogFormat,
     rebuild::{RebuildJob, RebuildState},
 };
 
@@ -126,6 +127,10 @@ macro_rules! test_init {
 }
 
 pub fn mayastor_test_init() {
+    mayastor_test_init_ex(LogFormat::default());
+}
+
+pub fn mayastor_test_init_ex(log_format: LogFormat) {
     fn binary_present(name: &str) -> Result<bool, std::env::VarError> {
         std::env::var("PATH").map(|paths| {
             paths
@@ -142,7 +147,9 @@ pub fn mayastor_test_init() {
                 panic!("binary: {} not present in path", binary);
             }
         });
-    logger::init("info,io_engine=DEBUG");
+
+    logger::init_ex("info,io_engine=DEBUG", log_format);
+
     io_engine::CPS_INIT!();
 }
 

@@ -88,7 +88,8 @@ impl FioJob {
         }
 
         if let Some(v) = self.runtime {
-            r.push(format!("--runtime={v}"));
+            r.push(format!("--time_based=1"));
+            r.push(format!("--runtime={v}s"));
         }
 
         if let Some(ref v) = self.size {

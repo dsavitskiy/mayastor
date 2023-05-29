@@ -5,16 +5,25 @@ pub async fn write_some(
     offset: u64,
     fill: u8,
 ) -> Result<(), CoreError> {
+    write_blocks(nexus_name, offset, 2, fill).await?;
+    Ok(())
+}
+
+pub async fn write_blocks(
+    nexus_name: &str,
+    offset: u64,
+    count: u32,
+    fill: u8,
+) -> Result<u64, CoreError> {
     let h = UntypedBdevHandle::open(nexus_name, true, false)?;
-    let buflen = u64::from(h.get_bdev().block_len() * 2);
+    let buflen = u64::from(h.get_bdev().block_len() * count);
     let mut buf = h.dma_malloc(buflen).expect("failed to allocate buffer");
     buf.fill(fill);
 
     let s = buf.as_slice();
     assert_eq!(s[0], fill);
 
-    h.write_at(offset, &buf).await?;
-    Ok(())
+    h.write_at(offset, &buf).await
 }
 
 pub async fn read_some(

@@ -482,7 +482,7 @@ async fn nexus_partial_rebuild_double_fault() {
     // Write some data to have something to rebuild.
     test_fio_to_nexus(
         &nex_0,
-        &Fio::new().with_job(
+        Fio::new().with_job(
             FioJob::new()
                 .with_bs(4096)
                 .with_iodepth(16)
@@ -515,7 +515,7 @@ async fn nexus_partial_rebuild_double_fault() {
         async move {
             test_fio_to_nexus(
                 &nex_0,
-                &Fio::new().with_job(
+                Fio::new().with_job(
                     FioJob::new()
                         .with_bs(4096)
                         .with_iodepth(16)
@@ -560,7 +560,7 @@ async fn nexus_partial_rebuild_double_fault() {
     // Write some data to have something to rebuild.
     test_fio_to_nexus(
         &nex_0,
-        &Fio::new().with_job(
+        Fio::new().with_job(
             FioJob::new()
                 .with_bs(4096)
                 .with_iodepth(16)
