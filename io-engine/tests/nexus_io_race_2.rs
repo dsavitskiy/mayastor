@@ -409,7 +409,7 @@ async fn nexus_io_race_ng() {
     // Run FIO in order to trigger I/O fault.
     test_fio_to_nexus(
         &nex_0,
-        &Fio::new().with_job(
+        Fio::new().with_job(
             FioJob::new()
                 .with_bs(4096)
                 .with_iodepth(8)

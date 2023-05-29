@@ -186,6 +186,7 @@ impl<'n> NexusBio<'n> {
     /// TODO
     pub(super) fn submit_request(mut self) {
         if self.channel().is_suspended() {
+            debug!("==== SUS: {self:?}");
             let p = self.legacy_as_ptr();
             self.channel_mut().suspend_io(p);
             return;

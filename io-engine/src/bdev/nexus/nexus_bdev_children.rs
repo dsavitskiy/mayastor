@@ -887,7 +887,11 @@ impl<'n> Nexus<'n> {
     ) -> Result<(), Error> {
         warn!("{self:?}: retiring child device '{dev}'...");
 
-        self.child_retire_persist(&dev).await;
+        {
+            self.control_nexus_io(NexusIOMode::Suspended).await;
+            self.child_retire_persist(&dev).await;
+            self.control_nexus_io(NexusIOMode::Running).await;
+        }
 
         self.disconnect_device(&dev).await;
 
@@ -934,8 +938,6 @@ impl<'n> Nexus<'n> {
             return;
         };
 
-        self.control_nexus_io(NexusIOMode::Suspended).await;
-
         let uri = child.uri();
 
         // Do not persist child state in case it's the last healthy child of
@@ -943,12 +945,6 @@ impl<'n> Nexus<'n> {
         // using this device as the replica with the most recent
         // user data.
         debug!("{self:?}: retire device '{dev}': updating persistent store...");
-
-        // #[cfg(feature = "nexus-fault-injection")]
-        // if self.inject_error(dev, InjectionOp::RetirePersist) {
-        //     warn!("{self:?}: retire persist skipped due to injection");
-        //     return;
-        // }
 
         self.persist(PersistOp::UpdateCond {
             child_uri: uri.to_owned(),
@@ -986,8 +982,6 @@ impl<'n> Nexus<'n> {
         }).await;
 
         debug!("{self:?}: retire device '{dev}': persistent store updated");
-
-        self.control_nexus_io(NexusIOMode::Running).await;
     }
 
     /// Disconnects a device from all I/O channels.
