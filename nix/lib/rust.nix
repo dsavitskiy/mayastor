@@ -5,5 +5,8 @@ let
 in
 with pkgs; rec  {
   nightly = rust-bin.nightly."2023-01-08".default;
+  asan = rust-bin.nightly."2023-01-08".default;
+#  nightly = rust-bin.nightly."2021-11-30".default;
+#  asan = rust-bin.nightly."2021-11-30".default;
   stable = rust-bin.stable.latest.default;
 }

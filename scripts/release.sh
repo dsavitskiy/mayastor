@@ -177,7 +177,7 @@ for name in $IMAGES; do
   if [ -z $SKIP_BUILD ]; then
     archive=${name}
     echo "Building $image:$TAG ..."
-    $NIX_BUILD --out-link $archive-image -A images.$archive
+    $NIX_BUILD --show-trace --out-link $archive-image -A images.$archive
     $DOCKER load -i $archive-image
     $RM $archive-image
     if [ "$image" != "$image_basename" ]; then
