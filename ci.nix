@@ -1,4 +1,4 @@
-{ nospdk ? false, norust ? false, spdk_rel ? false }:
+{ nospdk ? false, norust ? false, spdk_rel ? false, asan ? false }:
 let
   sources = import ./nix/sources.nix;
   pkgs = import sources.nixpkgs {
@@ -61,7 +61,8 @@ mkShell {
     xfsprogs
     yasm
   ] ++ (if (nospdk) then [ spdk.buildInputs ] else [ spdk ])
-  ++ pkgs.lib.optional (!norust) channel.stable
+  ++ pkgs.lib.optional (!norust && asan) channel.asan
+  ++ pkgs.lib.optional (!norust && !asan) channel.stable
   ++ pkgs.lib.optional (!norust) channel.nightly;
 
   RUST_NIGHTLY_PATH = channel.nightly;
@@ -71,6 +72,11 @@ mkShell {
   SPDK_PATH = if nospdk then null else "${spdk}";
   FIO_SPDK = if nospdk then null else "${spdk}/fio/spdk_nvme";
   ETCD_BIN = "${etcd}/bin/etcd";
+
+  ASAN_ENABLE = if asan then "1" else null;
+  ASAN_OPTIONS = if asan then "detect_leaks=0" else null;
+  RUSTFLAGS = if asan then "-Zsanitizer=address" else null;
+  RUST_BACKTRACE = if asan then "1" else null;
 
   shellHook = ''
     ${pkgs.lib.optionalString (!nospdk) "echo 'SPDK version    :' $(echo $SPDK_PATH | sed 's/.*libspdk-//g')"}
@@ -84,6 +90,16 @@ mkShell {
     ${pkgs.lib.optionalString (norust) "cowsay ${norust_moth}"}
     ${pkgs.lib.optionalString (norust) "echo 'Hint: use rustup tool.'"}
     ${pkgs.lib.optionalString (norust) "echo"}
+
+    ${pkgs.lib.optionalString (asan) "export LLVM_SYMBOLIZER_DIR=$(dirname $(realpath $(which llvm-symbolizer)))"}
+
+    ${pkgs.lib.optionalString (asan) "echo 'AddressSanitizer is enabled, forcing nightly rustc.'"}
+    ${pkgs.lib.optionalString (asan) "echo '  ASAN_ENABLE         =' $\{ASAN_ENABLE\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  ASAN_OPTIONS        =' $\{ASAN_OPTIONS\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  RUSTFLAGS           =' $\{RUSTFLAGS\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  RUST_BACKTRACE      =' $\{RUST_BACKTRACE\}"}
+    ${pkgs.lib.optionalString (asan) "echo '  LLVM_SYMBOLIZER_DIR =' $\{LLVM_SYMBOLIZER_DIR\}"}
+    ${pkgs.lib.optionalString (asan) "echo"}
 
     echo
 

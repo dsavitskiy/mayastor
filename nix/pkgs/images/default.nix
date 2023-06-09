@@ -19,6 +19,7 @@
 , utillinux
 , writeScriptBin
 , xfsprogs
+, llvmPackages_11
 , runCommand
 , tini
 , img_tag ? ""
@@ -39,6 +40,9 @@ let
       ExposedPorts = { "10124/tcp" = { }; };
       Entrypoint = [ "/bin/io-engine" ];
     };
+    runAsRoot = ''
+      cp ${pkgs.llvmPackages_11.llvm}/bin/llvm-symbolizer /bin/
+    '';
     extraCommands = ''
       mkdir tmp
       mkdir -p var/tmp
