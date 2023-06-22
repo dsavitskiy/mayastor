@@ -18,7 +18,7 @@ use spdk_rs::libspdk::{
     spdk_nvmf_tgt_create,
     spdk_nvmf_tgt_destroy,
     spdk_nvmf_tgt_listen_ext,
-    spdk_nvmf_tgt_stop_listen,
+    // spdk_nvmf_tgt_stop_listen,
     spdk_subsystem_fini_next,
     spdk_subsystem_init_next,
     SPDK_NVMF_DISCOVERY_NQN,
@@ -373,17 +373,17 @@ impl Target {
             }
         }
 
-        let cfg = Config::get();
-        let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
-        let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
-
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_replica.as_ptr())
-        };
-
-        unsafe {
-            spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_nexus.as_ptr())
-        };
+        // let cfg = Config::get();
+        // let trid_nexus = TransportId::new(cfg.nexus_opts.nvmf_nexus_port);
+        // let trid_replica = TransportId::new(cfg.nexus_opts.nvmf_replica_port);
+        //
+        // unsafe {
+        //     spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_replica.as_ptr())
+        // };
+        //
+        // unsafe {
+        //     spdk_nvmf_tgt_stop_listen(self.tgt.as_ptr(), trid_nexus.as_ptr())
+        // };
 
         unsafe {
             spdk_nvmf_tgt_destroy(
