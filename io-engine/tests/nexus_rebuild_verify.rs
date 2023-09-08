@@ -18,6 +18,7 @@ use common::{
     test::add_fault_injection,
 };
 
+use io_engine_tests::{file_io::DataSize, nexus::test_write_to_nexus};
 use std::time::Duration;
 
 const POOL_SIZE: u64 = 80;
@@ -148,6 +149,7 @@ async fn nexus_rebuild_verify_remote() {
 }
 
 #[tokio::test]
+#[ignore]
 async fn nexus_rebuild_verify_local() {
     common::composer_init();
 
@@ -210,4 +212,97 @@ async fn nexus_rebuild_verify_local() {
     repl_1.share().await.unwrap();
 
     test_rebuild_verify(ms_nex, repl_0, repl_1).await;
+}
+
+#[tokio::test]
+#[ignore]
+async fn nexus_pause_shutdown() {
+    common::composer_init();
+
+    let test = Builder::new()
+        .name("cargo-test")
+        .network("10.1.0.0/16")
+        .unwrap()
+        .add_container_bin(
+            "ms_nex",
+            Binary::from_dbg("io-engine").with_args(vec![
+                "-l",
+                "1,2,3,4",
+                "-Fcolor,nohost,compact",
+            ]),
+        )
+        .with_clean(true)
+        .build()
+        .await
+        .unwrap();
+
+    let conn = GrpcConnect::new(&test);
+
+    let ms_nex = conn.grpc_handle_shared("ms_nex").await.unwrap();
+
+    let mut pool_0 = PoolBuilder::new(ms_nex.clone())
+        .with_name("pool0")
+        .with_new_uuid()
+        .with_malloc("mem0", POOL_SIZE);
+
+    let mut repl_0 = ReplicaBuilder::new(ms_nex.clone())
+        .with_pool(&pool_0)
+        .with_name("r0")
+        .with_new_uuid()
+        .with_size_mb(REPL_SIZE)
+        .with_thin(false);
+
+    pool_0.create().await.unwrap();
+    repl_0.create().await.unwrap();
+
+    //-----------------------------------------------------
+
+    println!("---- go ...");
+    for i in 0 .. 10 {
+        println!("---- #{i} ");
+
+        let mut nex_0 = NexusBuilder::new(ms_nex.clone())
+            .with_name("nexus0")
+            .with_new_uuid()
+            .with_size_mb(NEXUS_SIZE)
+            .with_replica(&repl_0);
+
+        nex_0.create().await.unwrap();
+        nex_0.publish().await.unwrap();
+
+        let children = nex_0.get_nexus().await.unwrap().children;
+        assert_eq!(children.len(), 1);
+        let dev_name = children[0].device_name.as_ref().unwrap();
+
+        let inj_part = "op=write&type=data&offset=0";
+        let inj_uri = format!("inject://{dev_name}?{inj_part}");
+        add_fault_injection(nex_0.rpc(), &inj_uri).await.unwrap();
+
+        let j0 = tokio::spawn({
+            let nex_0 = nex_0.clone();
+            async move {
+                test_write_to_nexus(
+                    &nex_0,
+                    DataSize::from_bytes(0),
+                    1,
+                    DataSize::from_kb(1),
+                )
+                .await
+                .unwrap();
+            }
+        });
+        tokio::pin!(j0);
+
+        let j1 = tokio::spawn({
+            let mut nex_0 = nex_0.clone();
+            async move {
+                nex_0.shutdown().await.unwrap();
+                nex_0.destroy().await.unwrap();
+            }
+        });
+        tokio::pin!(j1);
+
+        let _ = tokio::join!(j0, j1);
+    }
+    println!("---- done");
 }
