@@ -145,13 +145,16 @@ impl NvmeDeviceHandle {
         ns: Arc<NvmeNamespace>,
         prchk_flags: u32,
     ) -> Result<NvmeDeviceHandle, CoreError> {
+        info!("-- get_io_channel for 0x{id:x}");
+        let x = unsafe { spdk_get_io_channel(id as *mut c_void) };
+        info!("|--> done get_io_channel for 0x{id:x}");
+
         // Obtain SPDK I/O channel for NVMe controller.
-        let io_channel = NvmeControllerIoChannel::from_null_checked(unsafe {
-            spdk_get_io_channel(id as *mut c_void)
-        })
-        .ok_or(CoreError::GetIoChannel {
-            name: name.to_string(),
-        })?;
+        let io_channel = NvmeControllerIoChannel::from_null_checked(x).ok_or(
+            CoreError::GetIoChannel {
+                name: name.to_string(),
+            },
+        )?;
 
         Ok(NvmeDeviceHandle {
             name: name.to_string(),
@@ -172,6 +175,7 @@ impl NvmeDeviceHandle {
         ns: Arc<NvmeNamespace>,
         prchk_flags: u32,
     ) -> Result<NvmeDeviceHandle, CoreError> {
+        debug!("-- create_sync {name} :: 0x{id:x}");
         let mut handle = Self::create_handle(name, id, ctrlr, ns, prchk_flags)?;
         handle.connect_sync();
         Ok(handle)

@@ -1232,6 +1232,7 @@ impl<'c> NexusChild<'c> {
     pub fn get_io_handle(
         &self,
     ) -> Result<Box<dyn BlockDeviceHandle>, CoreError> {
+        info!("-- {self:?}: get io handle");
         if let Some(desc) = self.device_descriptor.as_ref() {
             desc.get_io_handle()
         } else {

@@ -100,13 +100,18 @@ impl Nvmf {
 
         // set up custom NVMe Admin command handler
         admin_cmd::setup_create_snapshot_hdlr();
+        debug!("|--> NVMF subsystem init [1]");
 
         if Config::get().nexus_opts.nvmf_enable {
             NVMF_TGT.with(|tgt| tgt.borrow_mut().next_state());
+            debug!("|--> NVMF subsystem init [2]");
         } else {
             debug!("nvmf target disabled");
             unsafe { spdk_subsystem_init_next(0) }
+            debug!("|--> NVMF subsystem init [2s]");
         }
+
+        debug!("|--> NVMF subsystem init [d]");
     }
 
     extern "C" fn fini() {

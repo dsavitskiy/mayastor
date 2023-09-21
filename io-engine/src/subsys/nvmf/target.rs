@@ -128,18 +128,22 @@ impl Target {
         match self.next_state {
             TargetState::Init => {
                 self.next_state = TargetState::PollGroupInit;
+                info!("|----> tgt init");
                 self.init().unwrap();
             }
             TargetState::PollGroupInit => {
                 self.next_state = TargetState::AddTransport;
+                info!("|----> tgt init_poll_groups");
                 self.init_poll_groups();
             }
             TargetState::AddTransport => {
                 self.next_state = TargetState::AddListener;
+                info!("|----> tgt add_transport");
                 self.add_transport();
             }
             TargetState::AddListener => {
                 self.next_state = TargetState::Running;
+                info!("|----> tgt listen");
                 self.listen()
                     .map_err(|e| {
                         error!("failed to listen on address {}", e);
@@ -148,18 +152,22 @@ impl Target {
                     .unwrap();
             }
             TargetState::Running => {
+                info!("|----> tgt running");
                 self.running();
             }
             TargetState::ShutdownSubsystems => {
                 self.next_state = TargetState::DestroyPgs;
+                info!("|----> tgt stop_subsystems");
                 self.stop_subsystems();
             }
             TargetState::DestroyPgs => {
                 self.next_state = TargetState::Shutdown;
+                info!("|----> tgt destroy_pgs");
                 self.destroy_pgs();
             }
             TargetState::Shutdown => {
                 self.next_state = TargetState::ShutdownCompleted;
+                info!("|----> tgt shutdown");
                 self.shutdown();
             }
             TargetState::Invalid => {
@@ -167,7 +175,9 @@ impl Target {
                 unsafe { spdk_subsystem_init_next(1) }
             }
 
-            TargetState::ShutdownCompleted => {}
+            TargetState::ShutdownCompleted => {
+                info!("|----> tgt ShutdownCompleted");
+            }
         };
     }
 
@@ -187,6 +197,7 @@ impl Target {
     /// init the poll groups per core
     fn init_poll_groups(&self) {
         Reactors::iter().for_each(|r| {
+            info!("|----> new TGT PG thread for {rc}", rc = r.core());
             if let Some(t) = Mthread::new(
                 format!("mayastor_nvmf_tcp_pg_core_{}", r.core()),
                 r.core(),

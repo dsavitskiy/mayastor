@@ -98,6 +98,8 @@ impl<'n> NexusChannel<'n> {
                 }
             });
 
+         debug!("|--> {nexus:?}: new chan done");
+
         Self {
             writers,
             readers,

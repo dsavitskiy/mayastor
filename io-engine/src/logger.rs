@@ -349,10 +349,11 @@ impl LogFormat {
         } else {
             "%T%.6f"
         };
+        let tis = Colour::Yellow.paint(Self::thread_str());
 
         write!(
             writer,
-            "[{}{} {} {}{}:{}] ",
+            "[{}{} {} {}{}:{}] {tis} ",
             self.hostname(),
             chrono::Local::now().format(chrono_fmt),
             FormatLevel::new(meta.level(), self.ansi),
@@ -379,15 +380,16 @@ impl LogFormat {
     {
         let normalized = event.normalized_metadata();
         let meta = normalized.as_ref().unwrap_or_else(|| event.metadata());
-        let loc = ellipsis(&Location::new(meta).to_string(), 18);
+        let loc = ellipsis(&Location::new(meta).to_string(), 20);
         let fmt = FormatLevel::new(meta.level(), self.ansi);
         let now = chrono::Local::now();
+        let tis = Self::thread_str();
 
         let mut buf = String::new();
 
         write!(
             buf,
-            "{}{} | {:<18} [{}] ",
+            "{}{} | {:<20} [{}] {tis} ",
             self.hostname(),
             now.format(if self.show_date {
                 "%x %T%.6f"
@@ -409,6 +411,10 @@ impl LogFormat {
         context.format_fields(writer.by_ref(), event)?;
 
         writeln!(writer)
+    }
+
+    fn thread_str() -> String {
+        format!("[{}]", spdk_rs::Thread::current_info())
     }
 
     fn hostname(&self) -> &str {

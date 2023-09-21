@@ -81,6 +81,7 @@ impl RegistrationSubsystem {
 
     /// register the subsystem with spdk
     pub(super) fn register() {
+        info!("++ RegistrationSubsystem::reg");
         unsafe { spdk_add_subsystem(RegistrationSubsystem::new().0) }
     }
 }
