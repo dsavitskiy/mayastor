@@ -374,9 +374,9 @@ impl Target {
         }
 
         // TODO: properly fix use-after-free on spdk_nvmf_tgt_stop_listen call.
-        if std::env::var("ASAN_ENABLE").unwrap_or_default() == "1" {
+        if option_env!("ASAN_ENABLE").unwrap_or_default() == "1" {
             warn!(
-                "Running with Address Sanitizer enabled: \
+                "Compiled with Address Sanitizer enabled: \
                   won't stop listening targets as it causes \
                   use-after-free error"
             );

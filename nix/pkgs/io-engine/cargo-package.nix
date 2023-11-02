@@ -32,8 +32,8 @@ let
   version = versions.version;
   channel = import ../../lib/rust.nix { inherit sources; };
   rustPlatform = makeRustPlatform {
-    rustc = channel.stable;
-    cargo = channel.stable;
+    rustc = channel.asan;
+    cargo = channel.asan;
   };
   whitelistSource = src: allowedPrefixes:
     builtins.filterSource
@@ -97,9 +97,21 @@ in
 {
   release = rustPlatform.buildRustPackage (buildProps // {
     cargoBuildFlags = "--bin io-engine --bin io-engine-client --bin casperf";
-    buildType = "release";
-    buildInputs = buildProps.buildInputs ++ [ libspdk ];
-    SPDK_PATH = "${libspdk}";
+#    buildType = "release";
+#    buildInputs = buildProps.buildInputs ++ [ libspdk ];
+#    SPDK_PATH = "${libspdk}";
+    buildType = "debug";
+    buildInputs = buildProps.buildInputs ++ [ libspdk-dev ];
+    SPDK_PATH = "${libspdk-dev}";
+
+    ASAN_ENABLE = "1";
+    ASAN_OPTIONS = "detect_leaks=0";
+    ASAN_BUILD_ENV = "pkg";
+    RUSTFLAGS = "-Zsanitizer=address";
+    CARGO_BUILD_RUSTFLAGS = "-Zbuild-std";
+    CARGO_BUILD_TARGET = "x86_64-unknown-linux-gnu";
+    CARGO_PROFILE_DEV_PANIC = "unwind";
+    RUST_BACKTRACE = "full";
   });
   debug = rustPlatform.buildRustPackage (buildProps // {
     cargoBuildFlags = "--workspace --bins --exclude io-engine-bench";

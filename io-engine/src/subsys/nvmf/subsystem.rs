@@ -876,6 +876,7 @@ impl NvmfSubsystem {
     /// intended to be a temporary state while changes are made
     pub async fn pause(&self) -> Result<(), Error> {
         self.change_state("pause", |ss, cb, arg| unsafe {
+            info!("++ subsys pause >>>>");
             spdk_nvmf_subsystem_pause(ss, 1, cb, arg)
         })
         .await

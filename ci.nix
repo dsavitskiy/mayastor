@@ -78,6 +78,7 @@ mkShell {
   # ASAN-related Cargo settings.
   ASAN_ENABLE = if asan then "1" else null;
   ASAN_OPTIONS = if asan then "detect_leaks=0" else null;
+  ASAN_BUILD_ENV = if asan then "shell" else null;
   RUSTFLAGS = if asan then "-Zsanitizer=address" else null;
   CARGO_BUILD_RUSTFLAGS = if asan then "-Zbuild-std" else null;
   CARGO_BUILD_TARGET = if asan then "x86_64-unknown-linux-gnu" else null;
