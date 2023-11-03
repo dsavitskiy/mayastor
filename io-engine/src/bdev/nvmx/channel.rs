@@ -491,7 +491,15 @@ impl NvmeControllerIoChannel {
 
 impl Drop for NvmeControllerIoChannel {
     fn drop(&mut self) {
-        info!("++ I/O channel {:p} dropped", self.0.as_ptr());
-        unsafe { spdk_put_io_channel(self.0.as_ptr()) }
+        unsafe {
+            let ch = self.0.as_ptr();
+            let dev = (*ch).dev;
+
+            info!(
+                "@@@@ NvmeControllerIoChannel::drop(): chan={ch:p}, io_device={dev:p}"
+            );
+
+            spdk_put_io_channel(self.0.as_ptr())
+        }
     }
 }
