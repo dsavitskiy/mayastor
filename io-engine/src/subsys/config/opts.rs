@@ -101,12 +101,17 @@ pub struct NvmfTgtConfig {
 
 impl From<NvmfTgtConfig> for Box<spdk_nvmf_target_opts> {
     fn from(o: NvmfTgtConfig) -> Self {
-        let mut out = spdk_nvmf_target_opts {
-            name: unsafe { zeroed() },
-            max_subsystems: o.max_namespaces,
-            crdt: o.crdt,
-            discovery_filter: 0,
-        };
+        let mut out = struct_size_init!(
+            spdk_nvmf_target_opts {
+                name: unsafe { zeroed() },
+                max_subsystems: o.max_namespaces,
+                crdt: o.crdt,
+                discovery_filter: 0,
+                dhchap_digests: 0,
+                dhchap_dhgroups: 0,
+            },
+            size
+        );
         copy_str_with_null(&o.name, &mut out.name);
         Box::new(out)
     }
@@ -279,25 +284,29 @@ impl Default for NvmfTcpTransportOpts {
 /// know about it during compile time.
 impl From<NvmfTcpTransportOpts> for spdk_nvmf_transport_opts {
     fn from(o: NvmfTcpTransportOpts) -> Self {
-        Self {
-            max_queue_depth: o.max_queue_depth,
-            max_qpairs_per_ctrlr: o.max_qpairs_per_ctrl,
-            in_capsule_data_size: o.in_capsule_data_size,
-            max_io_size: o.max_io_size,
-            io_unit_size: o.io_unit_size,
-            max_aq_depth: o.max_aq_depth,
-            num_shared_buffers: o.num_shared_buf,
-            buf_cache_size: o.buf_cache_size,
-            dif_insert_or_strip: o.dif_insert_or_strip,
-            reserved29: Default::default(),
-            abort_timeout_sec: o.abort_timeout_sec,
-            association_timeout: 120000,
-            transport_specific: std::ptr::null(),
-            opts_size: std::mem::size_of::<spdk_nvmf_transport_opts>() as u64,
-            acceptor_poll_rate: o.acceptor_poll_rate,
-            zcopy: o.zcopy,
-            reserved61: Default::default(),
-        }
+        struct_size_init!(
+            Self {
+                max_queue_depth: o.max_queue_depth,
+                max_qpairs_per_ctrlr: o.max_qpairs_per_ctrl,
+                in_capsule_data_size: o.in_capsule_data_size,
+                max_io_size: o.max_io_size,
+                io_unit_size: o.io_unit_size,
+                max_aq_depth: o.max_aq_depth,
+                num_shared_buffers: o.num_shared_buf,
+                buf_cache_size: o.buf_cache_size,
+                dif_insert_or_strip: o.dif_insert_or_strip,
+                reserved29: Default::default(),
+                abort_timeout_sec: o.abort_timeout_sec,
+                association_timeout: 120000,
+                transport_specific: std::ptr::null(),
+                acceptor_poll_rate: o.acceptor_poll_rate,
+                zcopy: o.zcopy,
+                reserved61: Default::default(),
+                ack_timeout: 0,
+                data_wr_pool_size: 0,
+            },
+            opts_size
+        )
     }
 }
 
@@ -474,6 +483,9 @@ impl From<&NvmeBdevOpts> for spdk_bdev_nvme_opts {
             io_path_stat: false,
             allow_accel_sequence: false,
             rdma_max_cq_size: 0,
+            rdma_cm_event_timeout_ms: 0,
+            dhchap_digests: 0,
+            dhchap_dhgroups: 0,
         }
     }
 }
@@ -697,13 +709,16 @@ pub struct IoBufOpts {
 
 impl GetOpts for IoBufOpts {
     fn get(&self) -> Self {
-        let mut opts = spdk_iobuf_opts {
-            small_pool_count: 0,
-            large_pool_count: 0,
-            small_bufsize: 0,
-            large_bufsize: 0,
-        };
-        unsafe { spdk_iobuf_get_opts(&mut opts) };
+        let mut opts = struct_size_init!(
+            spdk_iobuf_opts {
+                small_pool_count: 0,
+                large_pool_count: 0,
+                small_bufsize: 0,
+                large_bufsize: 0,
+            },
+            opts_size
+        );
+        unsafe { spdk_iobuf_get_opts(&mut opts, opts.opts_size) };
         opts.into()
     }
 
@@ -741,11 +756,14 @@ impl From<spdk_iobuf_opts> for IoBufOpts {
 
 impl From<&IoBufOpts> for spdk_iobuf_opts {
     fn from(o: &IoBufOpts) -> Self {
-        Self {
-            small_pool_count: o.small_pool_count,
-            large_pool_count: o.large_pool_count,
-            small_bufsize: o.small_bufsize,
-            large_bufsize: o.large_bufsize,
-        }
+        struct_size_init!(
+            Self {
+                small_pool_count: o.small_pool_count,
+                large_pool_count: o.large_pool_count,
+                small_bufsize: o.small_bufsize,
+                large_bufsize: o.large_bufsize,
+            },
+            opts_size
+        )
     }
 }
